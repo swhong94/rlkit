@@ -1,7 +1,0 @@
-
-# Requirements 
-
-torch 
-numpy 
-matplotlib 
-gymnasium 
