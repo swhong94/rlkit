@@ -4,8 +4,9 @@ import torch.optim as optim
 import numpy as np 
 import gymnasium as gym 
 
-from torch.distributions import Normal  
+from torch.distributions import Normal, Categorical 
 from models.mlp import MLP_Policy, MLP_Value 
+from models.mlp import PolicyNet, ValueNet 
 from gymnasium.spaces import Box, Discrete 
 
 from utils import Logger 
@@ -16,7 +17,7 @@ class ActorCritic(nn.Module):
     Actor-critic Agent 
     """
     def __init__(self, 
-                 env, 
+                 env_name, 
                  hidden_dims, 
                  activation="ReLU", 
                  policy_lr = 1e-4, 
@@ -29,13 +30,16 @@ class ActorCritic(nn.Module):
         super(ActorCritic, self).__init__() 
 
         # Environment informations
-        self.env = env 
-        input_dim = env.observation_space.shape[0] 
-        output_dim = env.action_space.shape[0] if isinstance(env.action_space, Box) else env.action_space.n 
+        self.env = gym.make(env_name) 
+        input_dim = self.env.observation_space.shape[0] 
+        output_dim = self.env.action_space.shape[0] if isinstance(self.env.action_space, Box) else self.env.action_space.n 
+        output_type = "continuous" if isinstance(self.env.action_space, Box) else "discrete" 
 
         # Initialization (Actor and Critic) 
-        self.actor = MLP_Policy(input_dim, hidden_dims, output_dim, activation) 
-        self.critic = MLP_Value(input_dim, hidden_dims, activation) 
+        # self.actor = MLP_Policy(input_dim, hidden_dims, output_dim, activation) 
+        # self.critic = MLP_Value(input_dim, hidden_dims, activation) 
+        self.actor = PolicyNet(input_dim, hidden_dims, output_dim, output_type=output_type, activation=activation) 
+        self.critic = ValueNet(input_dim, hidden_dims, activation=activation) 
 
         # optimizers 
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=policy_lr) 
@@ -45,7 +49,10 @@ class ActorCritic(nn.Module):
         self.gamma = gamma 
         self.timestep = 0 
         self.max_steps = max_steps 
-        self.min_max = [torch.FloatTensor(self.env.action_space.low), torch.FloatTensor(self.env.action_space.high)]
+        if isinstance(self.env.action_space, Box): 
+            self.action_bounds = [torch.FloatTensor(self.env.action_space.low), torch.FloatTensor(self.env.action_space.high)]
+        else: 
+            self.action_bounds = None 
 
         # Logger 
         self.logger = Logger(log_dir, log_name_prefix="actor_critic", plot_window=plot_window) 
@@ -59,11 +66,20 @@ class ActorCritic(nn.Module):
         Select an action from the policy 
         """
         state_tensor = torch.FloatTensor(state) 
-        mu, sigma = self.actor(state_tensor) 
-        mu_scaled = mu * self.min_max[1]                  # Scale to [action_low, action_high]
-        dist = Normal(mu_scaled, sigma) 
-        action = dist.sample() 
-        action_clamped = torch.clamp(action, self.min_max[0], self.min_max[1])
+        if isinstance(self.env.action_space, Box):  
+            mu, sigma = self.actor(state_tensor) 
+            # mu_scaled = mu * self.min_max[1]                  # Scale to [action_low, action_high]
+            mu_scaled = torch.tanh(mu) * (self.action_bounds[1] - self.action_bounds[0]) / 2 + (self.action_bounds[1] + self.action_bounds[0]) / 2 
+            dist = Normal(mu_scaled, sigma) 
+            action = dist.sample() 
+            action_clamped = [torch.clamp(action, self.action_bounds[0], self.action_bounds[1]).item()] 
+            
+        else: 
+            logits = self.actor(state_tensor) 
+            dist = Categorical(logits=logits) 
+            action = dist.sample() 
+            action_clamped = action.item() 
+            
         log_prob = dist.log_prob(action) 
 
         return action_clamped, log_prob, state_tensor 
@@ -115,7 +131,11 @@ class ActorCritic(nn.Module):
 
         for t in range(self.max_steps): 
             action, log_prob, state_tensor = self.act(state) 
-            next_state, reward, done, truncated, _ = self.env.step([action.item()]) 
+            next_state, reward, done, truncated, _ = self.env.step(action) 
+            # if isinstance(self.env.action_space, Box): 
+            #     next_state, reward, done, truncated, _ = self.env.step([action.item()]) 
+            # else: 
+            #     next_state, reward, done, truncated, _ = self.env.step(action.item()) 
 
             reward, actor_loss, critic_loss = self.train_step(state_tensor, action, reward, next_state, log_prob, done) 
 
@@ -166,18 +186,31 @@ class ActorCritic(nn.Module):
 
 
 if __name__ == "__main__": 
-    env = gym.make("Pendulum-v1") 
+    # env = gym.make("Pendulum-v1") 
 
     agent = ActorCritic(
-        env = env, 
+        env_name = "Pendulum-v1", 
         hidden_dims = [128, 128], 
         policy_lr = 5e-6, 
         value_lr = 5e-5, 
         gamma = 0.9, 
-        max_steps = 200,
+        max_steps = 1000,
         log_dir="logs/actor_critic_logs",
-        device="cpu"
+        device="cpu", 
+        plot_window=60
     )
 
-    agent.train(max_episodes=2000, max_timesteps=200, log_interval=10) 
-    env.close() 
+    # agent = ActorCritic(
+    #     env_name = "CartPole-v1", 
+    #     hidden_dims = [128, 128], 
+    #     policy_lr = 4e-4, 
+    #     value_lr = 1e-3, 
+    #     gamma = 0.99, 
+    #     max_steps = 200, 
+    #     log_dir="logs/actor_critic_logs", 
+    #     device="cpu", 
+    #     plot_window=60
+    # )
+
+    agent.train(max_episodes=2000, max_timesteps=1000, log_interval=10) 
+    # env.close() 
