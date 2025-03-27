@@ -24,6 +24,7 @@ A simple toolkit for developing and experimenting with reinforcement learning al
 
 1. Install requirements:
 ```
-pip install -r requirements.txt 
+conda env create -f requirements.yml 
 ```
+
 
