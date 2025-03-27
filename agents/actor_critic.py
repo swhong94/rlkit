@@ -212,5 +212,5 @@ if __name__ == "__main__":
     #     plot_window=60
     # )
 
-    agent.train(max_episodes=2000, max_timesteps=1000, log_interval=10) 
+    agent.train(max_episodes=100, max_timesteps=1000, log_interval=10) 
     # env.close() 

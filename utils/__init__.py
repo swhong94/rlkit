@@ -128,7 +128,9 @@ class Logger:
             self.logger.removeHandler(handler) 
         
         plt.ioff() 
-        # Save plot to results directory 
+        # Save plot to results directory
+        if not os.path.exists("results"):
+            os.makedirs("results")
         plt.savefig(os.path.join("results", f"{self.log_name_prefix}_{self.timestamp}.png"))
         plt.close(self.fig) 
     
