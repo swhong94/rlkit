@@ -28,7 +28,7 @@ class ActorCritic(nn.Module):
         )
     
     def forward(self, state):
-        action_probs = self.actor(state)
+        action_probs = self.actor(state)    #state -> actor -> action_probs
         state_value = self.critic(state)
         return action_probs, state_value
 
@@ -37,11 +37,11 @@ def compute_advantages(rewards, values, gamma=0.99, lam=0.95):
     gae = 0
     next_value = 0
     for t in reversed(range(len(rewards))):
-        delta = rewards[t] + gamma * next_value - values[t]
-        gae = delta + gamma * lam * gae
+        delta = rewards[t] + gamma * next_value - values[t]  # delta = r + gamma * V(s') - V(s)
+        gae = delta + gamma * lam * gae # incremental gae
         advantages.insert(0, gae)
         next_value = values[t]
-    returns = [a + v for a, v in zip(advantages, values)]
+    returns = [a + v for a, v in zip(advantages, values)]   # returns = advantages + values
     return torch.tensor(advantages, dtype=torch.float32), torch.tensor(returns, dtype=torch.float32)
 
 def ppo_update(policy, optimizer, states, actions, old_log_probs, returns, advantages, clip_epsilon=0.2, epochs=10):
