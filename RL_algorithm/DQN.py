@@ -68,7 +68,7 @@ class DQN:
         self.update_frequency = update_frequency
         self.target_net_hard_update = target_net_hard_update    # hard update=True or soft update=False
         self.update_counter = 0   # target-network을 업데이트하기 위한 counter
-        self.update_target_network(tau = 1)   
+        self.update_target_network()   
 
     def _loss_info(self):   
         """CSV 파일의 헤더 정보 반환"""
@@ -80,7 +80,7 @@ class DQN:
         else:   # exploitation
             with torch.no_grad():   # 액션 샘플링 할때는 gradient 계산 안함
                 state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device) # state를 tensor로 변환 -> (1, state_dim)
-                q_values = self.q_net(state)    # state를 q_net에 넣어 각 action에 대한 q_values 계산
+                q_values = self.q_net(state)    # state를 q_net에 넣어 각 actio(왼, 오)에 대한 q_values 계산
                 return q_values.argmax().item() # q_values 중 가장 큰 값(greedy action)의 index 반환
 
     def decay_epsilon(self):   
@@ -106,7 +106,7 @@ class DQN:
         next_states = torch.FloatTensor(next_states).to(self.device)    #(batch_size, state_dim)
         dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device)   #(batch_size, 1, 1)
 
-        q_values = self.q_net(states).gather(1, actions)    #DQN output: Q( ,a)
+        q_values = self.q_net(states).gather(1, actions)    #DQN output: Q( ,왼), Q( ,오)
 
         with torch.no_grad():
             next_q_values = self.q_target(next_states).max(1, keepdim=True)[0]  #DQN output: max Q(s',a')
