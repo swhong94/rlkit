@@ -1,9 +1,10 @@
 import gymnasium as gym
 from RL_algorithm.REINFORCE import REINFORCE
 import matplotlib.pyplot as plt
+import numpy as np
 
 def train_reinforce():
-    env = gym.make("MountainCarContinuous-v0", render_mode=None, goal_velocity=0.1)  # default goal_velocity=0
+    env = gym.make("MountainCarContinuous-v0", render_mode="rgb_array", goal_velocity=0.1)  # default goal_velocity=0
 
     state_dim = env.observation_space.shape[0] #continuous state 
     action_dim = env.action_space.shape[0] #continuous action
@@ -13,6 +14,7 @@ def train_reinforce():
     episodes = 100  # 학습할 에피소드 수
     max_timestep = 500  # 최대 타임스텝 수
     losses = []  # loss 저장
+    moving_avg_losses =[]
     total_rewards = []  # score 저장
 
     for episode in range(episodes):
@@ -38,17 +40,27 @@ def train_reinforce():
         total_rewards.append(total_reward)
         losses.append(loss)
 
-        print(f"Episode {episode+1}, Total Reward: {total_reward:.2f}, loss: {loss:.4f}")
-            
+        # 이동 평균 계산
+        window_size = 10
+        if len(losses) >= window_size:
+            moving_avg_loss=np.mean(losses[-window_size:])      #-10~-1: 최근 10개 에피소드의 loss 평균 
+        else:
+            moving_avg_loss= np.mean(losses)
+        moving_avg_losses.append(moving_avg_loss)
+        print(f"Episode {episode+1}, Total Reward: {total_reward:.2f}, loss: {moving_avg_loss:.4f}")
+
     env.close()
 
     plt.plot(total_rewards, label="total reward")
-    plt.plot(losses, label="loss")
+#    plt.plot(losses, label="loss")
+    plt.plot(moving_avg_losses, label="moving average loss")
     plt.xlabel("Episode")
     plt.ylabel("total reward")
     plt.title("REINFORCE")
     plt.legend()
     plt.show()
+
+    
 
 if __name__ == "__main__":
     train_reinforce()
