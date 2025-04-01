@@ -12,7 +12,7 @@ def train_reinforce():
     agent = REINFORCE(state_dim, action_dim)  
 
     episodes = 100  # 학습할 에피소드 수
-    max_timestep = 500  # 최대 타임스텝 수
+    max_timestep = 500  # 최대 타임스텝 수 infinite: 999
     losses = []  # loss 저장
     moving_avg_losses =[]
     total_rewards = []  # score 저장
