@@ -47,6 +47,8 @@ class REINFORCE:
         return action.clamp(-1.0,1.0).item(), log_prob #at, log pi(at|st)
     
     def update(self, rewards, log_probs):
+        self.policy.train()
+        
         returns = []
         policy_loss = [] 
         G = 0   

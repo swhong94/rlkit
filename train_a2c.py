@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 def train_a2c():
-    env = gym.make("MountainCar-v0", render_mode="rgb_array", goal_velocity=0.1) 
+    env = gym.make("MountainCar-v0", goal_velocity=0.1) 
 
     state_dim = env.observation_space.shape[0] #continuous state 
     action_dim = env.action_space.n 
@@ -22,30 +22,32 @@ def train_a2c():
         done = False
         total_reward = 0
 
-        for _ in range(batch_size): #버퍼 사이즈만큼 반복
-            action, log_prob = agent.select_action(state) # action 선택
-            next_state, reward, terminated, truncated, _ = env.step(action) #action으로 다음 state, reward, done을 받아옴 
+        for _ in range(batch_size): #Update within buffer size
+            action, log_prob, _ = agent.select_action(state) 
+            next_state, reward, terminated, truncated, _ = env.step(action) 
             done = terminated or truncated
 
-            agent.store_transition(state, action, log_prob, reward, next_state, done) # 버퍼에 transition 저장
+            # Store transition in the buffer
+            agent.buffer.push(state, action, log_prob, reward, next_state, done) 
             total_reward+=reward
             state = next_state 
+
+            #Update the agent
+            loss = agent.update()
             if done: 
                 break
-            # 여기까진 버퍼에 하나씩 차곡차곡 쌓는 과정
 
-        loss = agent.update() # 버퍼에 저장된 transition을 이용해 agent 업데이트
         total_rewards.append(total_reward)
         a2c_loss.append(loss)
 
-        # 이동 평균 계산
+        # Calculate moving average loss
         window_size = 10
         if len(a2c_loss) >= window_size:
             moving_avg_loss=np.mean(a2c_loss[-window_size:])      #-10~-1: 최근 10개 에피소드의 loss 평균 
         else:
             moving_avg_loss= np.mean(a2c_loss)
         moving_avg_a2c_loss.append(moving_avg_loss)
-        print(f"Episode {episode+1}, Total Reward: {total_reward:.2f}, loss: {loss:.4f}")
+        print(f"Episode {episode+1}, Total Reward: {total_reward:.2f}, loss: {moving_avg_loss:.4f}")
 
     env.close()
 
