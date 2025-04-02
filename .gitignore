@@ -5,3 +5,5 @@ logs/
 results/
 *.png 
 *.ipynb
+
+checkpoints/ 
