@@ -7,6 +7,10 @@ from torch.distributions import Normal
 from models.mlp import PolicyNet, ValueNet
 from utils import Logger
 
+class dummy: 
+    def __init__(self):
+        pass 
+    
 class PPO:
     def __init__(self, env, hidden_layers=[64, 64], policy_lr=3e-4, value_lr=1e-3, gamma=0.99, 
                  gae_lambda=0.95, clip_ratio=0.2, epochs=10, batch_size=64, entropy_coeff=0.01, 

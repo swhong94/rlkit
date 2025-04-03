@@ -10,3 +10,6 @@ checkpoints/
 
 agents/ddpg_test.py 
 agents/ddpg.py
+agents/ppo_continuous.py
+
+# agents/ppo_discrete.py 
