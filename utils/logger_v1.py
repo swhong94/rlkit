@@ -5,7 +5,6 @@ from datetime import datetime
 
 import numpy as np 
 import matplotlib.pyplot as plt 
-import math
 
 def rolling_average(data, window=100): 
     """
@@ -14,7 +13,7 @@ def rolling_average(data, window=100):
     data = np.pad(data, (window-1, 0), mode='constant', constant_values=data[0])
     return np.convolve(data, np.ones(window)/window, mode='valid') 
 
-class Logger: 
+class Logger_v1: 
     """
     Logger class for logging training information
     """
@@ -82,26 +81,14 @@ class Logger:
         if self.fig is None: 
             plt.ion() 
             num_metrics = len(metrics) 
-            
-            # Determine grid layout
-            if num_metrics <= 3:
-                rows, cols = num_metrics, 1
-                figsize = (10, num_metrics * 3)
-            else:
-                rows, cols = 3, 3
-                figsize = (15, 12)
-                
-            self.fig = plt.figure(figsize=figsize)
-            # plt.xticks([])
-            # plt.yticks([])
-            self.fig.suptitle(f"{self.logger.name.upper()} Training Progress", fontsize=16, fontweight='bold')
-            
-            for i, key in enumerate(metrics.keys()):
-                if i < rows * cols:  # Only create subplots for metrics that fit in the grid
-                    ax = self.fig.add_subplot(rows, cols, i + 1)
-                    self.axes[key] = ax
-                    self.axes[key].set_ylabel(key.replace("_", " ").title())
-                    self.axes[key].set_xlabel("Episode")
+            self.fig, axes = plt.subplots(num_metrics, 1, figsize=(10, num_metrics*3)) 
+            if num_metrics == 1: 
+                axes = [axes] 
+            plt.xlabel("Episode") 
+            self.fig.suptitle(f"{self.logger.name.upper()} Training Progress")
+            for i, key in enumerate(metrics.keys()): 
+                self.axes[key] = axes[i]
+                self.axes[key].set_ylabel(key.replace("_", " ").title())
 
 
         # Compute rolling average 
@@ -115,22 +102,21 @@ class Logger:
 
         
         for key in metrics.keys():
-            if key in self.axes:  # Only update plots for metrics that have axes
-                if key not in self.lines: 
-                    self.lines[key], = self.axes[key].plot(self.episodes, self.metrics_history[key], 
-                                                           label=f"{key.replace('_', ' ').title()}", alpha=alpha)
-                    if self.plot_window is not None: 
-                        self.smoothed_lines[key], = self.axes[key].plot(self.episodes, smoothed_metrics[key], 
-                                                                       label=f"{key.replace('_', ' ').title()} (MA={self.plot_window})")
-                else: 
-                    self.lines[key].set_data(self.episodes, self.metrics_history[key])
-                    if self.plot_window is not None: 
-                        self.smoothed_lines[key].set_data(self.episodes, smoothed_metrics[key])
-                
-                self.axes[key].relim()
-                self.axes[key].autoscale_view() 
-                self.axes[key].legend() 
+            if key not in self.lines: 
+                self.lines[key], = self.axes[key].plot(self.episodes, self.metrics_history[key], 
+                                                       label=f"{key.replace('_', ' ').title()}", alpha=alpha)
+                if self.plot_window is not None: 
+                    self.smoothed_lines[key], = self.axes[key].plot(self.episodes, smoothed_metrics[key], 
+                                                                   label=f"{key.replace('_', ' ').title()} (MA={self.plot_window})")
+            else: 
+                self.lines[key].set_data(self.episodes, self.metrics_history[key])
+                if self.plot_window is not None: 
+                    self.smoothed_lines[key].set_data(self.episodes, smoothed_metrics[key])
+            
 
+            self.axes[key].relim()
+            self.axes[key].autoscale_view() 
+            self.axes[key].legend() 
 
         plt.tight_layout() 
         plt.draw() 
@@ -147,3 +133,4 @@ class Logger:
             os.makedirs("results")
         plt.savefig(os.path.join("results", f"{self.log_name_prefix}_{self.timestamp}.png"))
         plt.close(self.fig) 
+    

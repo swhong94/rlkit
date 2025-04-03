@@ -1,9 +1,10 @@
 
-from .logger import Logger 
+from .logger_v1 import Logger_v1
 from .replay_buffer import ReplayBuffer 
+from .noise import OUNoise 
+from .logger import Logger
 
-
-__all__ = ["Logger", "ReplayBuffer"] 
+__all__ = ["Logger", "ReplayBuffer", "OUNoise", "Logger_v1"]  
 
 
 
