@@ -100,7 +100,7 @@ class DQN(nn.Module):
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size) 
 
         # Compute Q-values 
-        q_vals = self.q_network(states).gather(1, actions)      # Gathers Q-values matching the actions (like indexing)
+        q_vals = self.q_network(states).gather(1, actions.unsqueeze(1))      # Gathers Q-values matching the actions (like indexing)
         
         # Compute target Q-values
         with torch.no_grad(): 

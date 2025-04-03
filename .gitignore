@@ -7,3 +7,6 @@ results/
 *.ipynb
 
 checkpoints/ 
+
+agents/ddpg_test.py 
+agents/ddpg.py

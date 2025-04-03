@@ -26,4 +26,19 @@ class Agent(nn.Module):
         pass 
 
     def load(self, path): 
-        pass
+        pass 
+
+    def evaluate(self, env, num_episodes): 
+        """Evaluate the agent"""
+        pass 
+
+
+
+def soft_update(target, 
+                source,
+                tau: float=0.005):
+    """Soft update the target network"""
+
+    for target_param, source_param in zip(target.parameters(), source.parameters()): 
+        target_param.data.copy_(tau * source_param.data + (1-tau) * target_param.data) 
+    
