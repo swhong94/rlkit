@@ -6,7 +6,7 @@ import numpy as np
 
 from torch.distributions import Categorical 
 from torch.optim import Adam 
-
+from gymnasium.spaces import Discrete 
 from utils import Logger 
 from .core import PolicyNet, ValueNet 
 
@@ -34,6 +34,7 @@ class PPO:
         self.env = env
         self.log_prefix = "ppo_" + env.unwrapped.spec.id 
         self.input_dim = self.env.observation_space.shape[0] 
+        assert isinstance(self.env.action_space, Discrete), "Only discrete action spaces are supported for now (Box will be added later)"
         self.output_dim = self.env.action_space.n
 
         # self.actor = MLP_Policy(self.input_dim, hidden_dims, self.output_dim) 

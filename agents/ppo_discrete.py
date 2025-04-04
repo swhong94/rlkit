@@ -263,7 +263,8 @@ class PPO:
 
 if __name__ == "__main__":  
     # env = gym.make("LunarLander-v3") 
-    env_name = "LunarLander-v3"
+    # env_name = "LunarLander-v3"
+    env_name = "CartPole-v1"
     agent = PPO(
         env_name=env_name, 
         hidden_dims=[64, 64], 
@@ -278,7 +279,7 @@ if __name__ == "__main__":
         log_dir="logs/ppo_discrete_logs", 
         plot_window=30,)
     
-    agent.train(max_episodes=2000, log_interval=50) 
+    agent.train(max_episodes=500, log_interval=50) 
     mean_reward = agent.evaluate(num_episodes=1, max_steps=500) 
     print(f"Mean Reward: {mean_reward:>10.4f}")
 
