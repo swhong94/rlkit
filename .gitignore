@@ -9,7 +9,8 @@ results/
 checkpoints/ 
 
 agents/ddpg_test.py 
-agents/ddpg.py
+agents/ddpg_v1.py
 agents/ppo_continuous.py
+agents/REINFORCE_v1.py
 
 # agents/ppo_discrete.py 
