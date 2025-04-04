@@ -7,7 +7,7 @@ from collections import deque
 import random
 
 from utils import ReplayBuffer, OUNoise
-from agents.ddpg.fcnet import Actor, Critic 
+from agents.ddpg.core import Actor, Critic 
 from utils import Logger 
 
 

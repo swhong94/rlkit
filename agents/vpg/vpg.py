@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import gymnasium as gym 
      
-from agents.vpg.fcnet import PolicyNet, ValueNet 
+from agents.vpg.core import PolicyNet, ValueNet 
 from utils import Logger 
 
 
