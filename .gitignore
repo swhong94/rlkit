@@ -12,5 +12,10 @@ agents/ddpg_test.py
 agents/ddpg_v1.py
 agents/ppo_continuous.py
 agents/REINFORCE_v1.py
+agents/dqn_v1.py
+agents/ppo/ippo.py
+agents/ppo/ippo_DCA.py
 
 # agents/ppo_discrete.py 
+dca_test.py
+test_env/ 

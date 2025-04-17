@@ -5,8 +5,9 @@ import torch.optim as optim
 import numpy as np
 import gymnasium as gym
 import os 
-from models.mlp import PolicyNet
+# from models.mlp import PolicyNet
 
+from .core import ValueNetwork
 from utils import Logger, ReplayBuffer
 
 
@@ -42,8 +43,8 @@ class DQN(nn.Module):
         assert isinstance(env.action_space, gym.spaces.Discrete), "Action space must be discrete for DQN"
         self.action_dim = env.action_space.n 
 
-        self.q_network = PolicyNet(self.state_dim, hidden_dims, self.action_dim, output_type='discrete', activation="ReLU") 
-        self.target_network = PolicyNet(self.state_dim, hidden_dims, self.action_dim, output_type='discrete', activation="ReLU") 
+        self.q_network = ValueNetwork(self.state_dim, hidden_dims, self.action_dim, activation="ReLU") 
+        self.target_network = ValueNetwork(self.state_dim, hidden_dims, self.action_dim, activation="ReLU") 
 
         # Initialize target network with same weights as q_network 
         self.target_network.load_state_dict(self.q_network.state_dict()) 
@@ -65,7 +66,7 @@ class DQN(nn.Module):
         self.gradient_clipping = True 
 
         # initialize replay buffer 
-        self.replay_buffer = ReplayBuffer(capacity=buffer_size, device=device)  
+        self.replay_buffer = ReplayBuffer(capacity=buffer_size)  
 
         # Initialize logger 
         self.logger = Logger(log_dir, log_name_prefix="dqn", plot_window=plot_window) 
@@ -98,6 +99,11 @@ class DQN(nn.Module):
             return 0.0, 0.0 
         
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size) 
+        states = torch.FloatTensor(states).to(self.device) 
+        actions = torch.LongTensor(actions).to(self.device) 
+        rewards = torch.FloatTensor(rewards).to(self.device).unsqueeze(1) 
+        next_states = torch.FloatTensor(next_states).to(self.device) 
+        dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device) 
 
         # Compute Q-values 
         q_vals = self.q_network(states).gather(1, actions.unsqueeze(1))      # Gathers Q-values matching the actions (like indexing)
@@ -139,7 +145,7 @@ class DQN(nn.Module):
             next_state, reward, done, truncated, info = self.env.step(action)  
 
             # Store transition in replay buffer 
-            self.replay_buffer.push(state, action, reward, next_state, float(done or truncated))
+            self.replay_buffer.add(state, action, reward, next_state, float(done or truncated))
 
             # Update
             loss, _ = self.train_step()
@@ -235,16 +241,16 @@ if __name__ == "__main__":
                 epsilon_start=1.0, 
                 epsilon_end=0.01, 
                 epsilon_decay=10000,
-                buffer_size=100000, 
+                buffer_size=10000, 
                 batch_size=64, 
                 target_update_frequency=100, 
-                max_steps=500, 
+                max_steps=200, 
                 log_dir="logs/dqn_logs", 
                 plot_window=100, 
                 device='cpu')
     
-    num_episodes = 500
-    max_timesteps = 500
+    num_episodes = 2000
+    max_timesteps = 200
     log_interval = 10 
 
     agent.train(num_episodes, max_timesteps, log_interval) 
