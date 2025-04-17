@@ -8,7 +8,7 @@ from torch.distributions import Categorical
 from torch.optim import Adam 
 from gymnasium.spaces import Discrete 
 from utils import Logger 
-from .core import PolicyNet, ValueNet 
+from .network import PolicyNet, ValueNet 
 
 
 class PPO:

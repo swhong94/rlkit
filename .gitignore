@@ -15,6 +15,9 @@ agents/REINFORCE_v1.py
 agents/dqn_v1.py
 agents/ppo/ippo.py
 agents/ppo/ippo_DCA.py
+agents/ppo_discrete_v1.py  
+agents/core.py
+agents/actor_critic_v1.py
 
 # agents/ppo_discrete.py 
 dca_test.py

@@ -4,8 +4,8 @@ import numpy as np
 import torch 
 import torch.nn as nn 
 
-from agents.actor_critic import ActorCritic
-from agents.REINFORCE import REINFORCE 
+from agents.actor_critic_v1 import ActorCritic
+from agents.REINFORCE_v1 import REINFORCE 
 
 def main(): 
     env = gym.make("Pendulum-v1") 

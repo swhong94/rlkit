@@ -7,7 +7,7 @@ import gymnasium as gym
 import os 
 # from models.mlp import PolicyNet
 
-from .core import ValueNetwork
+from .network import ValueNetwork
 from utils import Logger, ReplayBuffer
 
 
