@@ -4,12 +4,10 @@ import random
 
 class CSMA_CA_Agent: 
     """
-    Node class that is distributed in the network and transmits messages to the access point
-    This class will be replaced with a MARL agent (or an agent) 
-
-    Has its own backoff timer and strategy (Default: Binary Exponential Backoff (or Random), 
-    Else: Agent actions (Not implemented yet)) 
+    CSMA-CA Agent for the CSMACA environment.
+    This agent implements the CSMA-CA protocol with two strategies: BEB (Binary Exponential Backoff) and Random Backoff.
     """
+    
     def __init__(self, node_id, cw_min, cw_max, strategy='beb'):
         self.node_id = node_id  #노드 id
         self.cw_min = cw_min    #최소 대기 시간
