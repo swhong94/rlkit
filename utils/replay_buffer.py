@@ -5,53 +5,6 @@ import random
 import torch 
 
 
-# class ReplayBuffer: 
-#     """ 
-#     A simple replay buffer for storing and sampling for experience replay 
-    
-#     Args: 
-#         capacity (int): maximum size of the buffer 
-#         device (str): device to store (request) the buffer ('cpu' or 'cuda')
-#     """
-#     def __init__(self, 
-#                  capacity, 
-#                  device='cpu'): 
-#         self.buffer = deque(maxlen=capacity) 
-#         self.device = device 
-
-#     def push(self, state, action, reward, next_state, done): 
-#         """
-#         Add a transition (experience) to the buffer 
-#         """
-#         # Store as a tuple
-#         transition = (state, action, reward, next_state, done) 
-#         self.buffer.append(transition) 
-
-#     def sample(self, batch_size): 
-#         """Sample a batch from the buffer: 
-        
-#         Returns: Tuple of tensors (states, actions, rewards, next_states, dones)"""
-
-#         # Randomly sample a batch of transitions 
-#         transitions = random.sample(self.buffer, batch_size) 
-
-#         # Unzip and convert to tensors 
-#         states, actions, rewards, next_states, dones = zip(*transitions)            
-#         states = torch.FloatTensor(np.array(states)).to(self.device)                    # tensor shape: (batch_size, state_dim)
-#         actions = torch.LongTensor(np.array(actions)).to(self.device)      # tensor shape: (batch_size, 1)
-#         rewards = torch.FloatTensor(np.array(rewards)).unsqueeze(1).to(self.device)     # tensor shape: (batch_size, 1)
-#         next_states = torch.FloatTensor(np.array(next_states)).to(self.device)          # tensor shape: (batch_size, state_dim)
-#         dones = torch.FloatTensor(np.array(dones)).unsqueeze(1).to(self.device)         # tensor shape: (batch_size, 1)
-
-#         return states, actions, rewards, next_states, dones 
-
-#     def __len__(self):
-#         """Return the current size of the buffer"""
-#         return len(self.buffer) 
-    
-
-
-
 
 class ReplayBuffer: 
     def __init__(self, capacity): 
@@ -69,4 +22,44 @@ class ReplayBuffer:
         return len(self.buffer) 
     
 
+class PrioritizedReplayBuffer: 
+    def __init__(self, capacity, alpha=0.6, beta=0.4, beta_annealing_steps=10000): 
+        self.capacity = capacity 
+        self.buffer = deque(maxlen=capacity) 
+        self.priorities = deque(maxlen=capacity) 
+        self.alpha = alpha 
+        self.beta = beta 
+        self.beta_annealing_steps = beta_annealing_steps 
+        self.step = 0 
 
+    def add(self, state, action, reward, next_state, done): 
+        max_priority = max(self.priorities, default=1.0)
+        self.buffer.append((state, action, reward, next_state, done)) 
+        self.priorities.append(max_priority) 
+    
+    def sample(self, batch_size):
+        priorities = np.array(self.priorities, dtype=np.float32)
+        probs = priorities ** self.alpha 
+        probs /= probs.sum() 
+        indices = np.random.choice(len(self.buffer), batch_size, p=probs)
+
+        # Importance sampling weights 
+        weights = (len(self.buffer) * probs[indices]) ** (-self.beta) 
+        weights /= weights.max() 
+
+        # Anneal beta 
+        self.step += 1 
+        self.beta = min(1.0, self.beta + (1.0 - self.beta) * self.step / self.beta_annealing_steps)
+
+        # Sample batch 
+        batch = [self.buffer[i] for i in indices]
+        states, actions, rewards, next_states, dones = zip(*batch) 
+        return (np.array(states), np.array(actions), np.array(rewards), np.array(next_states), np.array(dones), indices, weights)
+    
+    def update_priorities(self, indices, td_errors): 
+        for idx, td_error in zip(indices, td_errors): 
+            self.priorities[idx] = (abs(td_error) + 1e-6) ** self.alpha 
+    
+    def __len__(self): 
+        return len(self.buffer) 
+    
