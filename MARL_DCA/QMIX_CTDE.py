@@ -1,149 +1,117 @@
 import torch
-import random
-from collections import deque
-from MARL_DCA import QmixVariableSetup
-
 import torch.nn as nn
 import torch.optim as optim
+import numpy as np
 
+'''
+QMIX: A Deep Reinforcement Learning Algorithm for Multi-Agent Systems
+- Mixing Network: Monotonic Q_total(개별 Q값 증가 -> 전체 Q값 증가)
+- Q_total: Q-value for the entire team
+- Q_individual: Q-value for each agent
+QMIX는 협력형 멀티 에이전트 알고리즘
+학습: state+joint action,
+실행: local observation+action
+exploration: epsilon-greedy
+'''
 
-args = QmixVariableSetup.parse_args()
-
-# Initialize parameters from arguments
-n = args.n
-epsilon = args.epsilon
-gamma = args.gamma
-T = args.T
-Nr = args.Nr
-batch_size = args.batch_size
-memory_size = args.memory_size
-lr = args.lr
-
-t = args.t
-cnt = args.cnt
-s = args.s0             # Initial global state
-tau = [args.tau0] * n   # Initial local observations
-a = [args.a0] * n       # Initial actions
-z = [args.z0] * n       # Transmission status
-beta = [args.beta0] * n  # Weighting factors
-theta = args.theta0     # Neural network parameters
-theta_target = args.theta_target0  # Target network parameters
-
-
-# Define neural network for agents
-class MLP(nn.Module):
-    def __init__(self, input_dim, output_dim):
-        super(MLP, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(input_dim, 128),
+# 개별 에이전트의 Q-network
+class AgentQNetwork(nn.Module):
+    def __init__(self, obs_dim, action_dim, hidden_dim=64):  # state_dim -> MARL:obs_dim
+        super(AgentQNetwork, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(128, output_dim)
+            nn.Linear(hidden_dim, action_dim)
         )
 
-    def forward(self, x):
-        return self.fc(x)
+    def forward(self, obs):
+        return self.net(obs)  # Q-values for all actions
 
+# Mixing Network (Monotonic Q_total)
+class MixingNetwork(nn.Module):
+    def __init__(self, n_agents, state_dim, hidden_dim=32): # num of agents, global_state_dim
+        super(MixingNetwork, self).__init__()
+        self.hyper_w1 = nn.Linear(state_dim, n_agents * hidden_dim)
+        self.hyper_b1 = nn.Linear(state_dim, hidden_dim)
 
-class ExperienceMemory: #Use EM at AP
-    def __init__(self, capacity=memory_size):  # Initialize
-        self.buffer = deque(maxlen=capacity)
+        self.hyper_w2 = nn.Linear(state_dim, hidden_dim)
+        self.hyper_b2 = nn.Linear(state_dim, 1) # output: Q_total
 
-    def push(self, s, tau, a, r, s_next, tau_next): # Store experience in memory
-        if len(self.buffer) == self.buffer.maxlen:
-            self.buffer.popleft()  
-        self.buffer.append((s, tau, a, r, s_next, tau_next))
+        self.n_agents = n_agents
+        self.hidden_dim = hidden_dim
 
-    def sample(self, bs=batch_size):  # Use batch_size and sample experiences
-        if len(self.buffer) < bs:
-            return None
-        batch = random.sample(self.buffer, bs)  # Randomly sample batch_size experiences
-        s_batch, tau_batch, a_batch, r_batch, s_next_batch, tau_next_batch = zip(*batch)
-        return (torch.stack(s_batch),
-                torch.stack(tau_batch),
-                torch.tensor(a_batch, dtype=torch.int64),
-                torch.tensor(r_batch, dtype=torch.float32),
-                torch.stack(s_next_batch),
-                torch.stack(tau_next_batch))
+    def forward(self, agent_qs, global_state):  
+        '''
+        q_total = f(Q_1, Q_2, ..., Q_n; s)
+        = relu(w1 @ Q_agents + b1) @ w2 + b2
+        ''' 
+        B = agent_qs.size(0)  # batch size = 샘플링 된 32개의 transition 각각에 대해 생성한 q값        agents_qs = (B, n_agents)
+        agent_qs = agent_qs.view(-1, 1, self.n_agents)  # (B, 1, n_agents)
 
-    def __len__(self):
-        return len(self.buffer)
-    
-class AgentNetwork:
-    def __init__(self, input_dim, output_dim, lr=lr, gamma=gamma, epsilon=epsilon, 
-                    buffer_capacity=memory_size, tarnet_update_frequency=Nr, epsilon_min=0.01, epsilon_decay=0.995, device=None):
-        self.device = device if device else 'cpu'
+        w1 = torch.abs(self.hyper_w1(global_state)).view(-1, self.n_agents, self.hidden_dim)
+        b1 = self.hyper_b1(global_state).view(-1, 1, self.hidden_dim)
+
+        h = torch.bmm(agent_qs, w1) + b1  # (B, 1, hidden_dim)
+        h = torch.relu(h)
+
+        w2 = torch.abs(self.hyper_w2(global_state)).view(-1, self.hidden_dim, 1)
+        b2 = self.hyper_b2(global_state).view(-1, 1, 1)
+
+        q_total = torch.bmm(h, w2) + b2  # (B, 1, 1)
+        return q_total.view(-1, 1)
+
+# QMIX 전체 구성 클래스
+class QMIX:
+    def __init__(self, n_agents, obs_dim, action_dim, state_dim, gamma=0.99, lr=0.001):
+        self.n_agents = n_agents
+        self.action_dim = action_dim
         self.gamma = gamma
-        self.epsilon = epsilon
-        self.epsilon_min = epsilon_min
-        self.epsilon_decay = epsilon_decay
-        self.tarnet_update_frequency = tarnet_update_frequency
 
-        # Experience replay memory
-        self.buffer = ExperienceMemory(buffer_capacity)
+        self.agent_qnets = [AgentQNetwork(obs_dim, action_dim) for _ in range(n_agents)]
+        self.target_qnets = [AgentQNetwork(obs_dim, action_dim) for _ in range(n_agents)]
+        self.mixer = MixingNetwork(n_agents, state_dim)
+        self.target_mixer = MixingNetwork(n_agents, state_dim)
 
-        # Define Q-network and target network
-        self.q_net = MLP(input_dim, output_dim).to(self.device)
-        self.target_net = MLP(input_dim, output_dim).to(self.device)
-        self.target_net.load_state_dict(self.q_net.state_dict())
-        self.target_net.eval()
+        self.agent_qnets = nn.ModuleList(self.agent_qnets)
+        self.target_qnets = nn.ModuleList(self.target_qnets)
 
-        # Optimizer
-        self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
+        self.optim = optim.Adam(list(self.agent_qnets.parameters()) + list(self.mixer.parameters()), lr=lr)
 
-        # Counter for target network updates
-        self.update_counter = 0
+    def train(self, batch):
+        # batch: dict with keys 'obs', 'state', 'actions', 'rewards', 'next_obs', 'next_state', 'dones'
+        obs, state, actions, rewards, next_obs, next_state, dones = \
+            batch['obs'], batch['state'], batch['actions'], batch['rewards'], batch['next_obs'], batch['next_state'], batch['dones']
 
-    def select_action(self, tau):
-        if random.random() < self.epsilon:  # Exploration
-            return random.randint(0, self.q_net.fc[-1].out_features - 1)
-        else:  # Exploitation
-            with torch.no_grad():
-                tau_tensor = torch.tensor(tau, dtype=torch.float32).unsqueeze(0).to(self.device)
-                q_values = self.q_net(tau_tensor)
-                return q_values.argmax().item()
+        # Q-values from each agent
+        agent_qs = []
+        next_agent_qs = []
 
-    def store_experience(self, s, tau, a, r, s_next, tau_next):
-        self.buffer.push(s, tau, a, r, s_next, tau_next)
+        for i in range(self.n_agents):
+            q = self.agent_qnets[i](obs[:, i, :])
+            q = q.gather(1, actions[:, i].unsqueeze(1))
+            agent_qs.append(q)
 
-    def update(self, beta):
-        if len(self.buffer) < batch_size:
-            return None
+            next_q = self.target_qnets[i](next_obs[:, i, :])
+            next_q = next_q.max(dim=1, keepdim=True)[0]
+            next_agent_qs.append(next_q)
 
-        # Sample a batch of experiences
-        batch = self.buffer.sample(batch_size)
-        if batch is None:
-            return None
+        agent_qs = torch.cat(agent_qs, dim=1)  # (B, n_agents)
+        next_agent_qs = torch.cat(next_agent_qs, dim=1)
 
-        s_batch, tau_batch, a_batch, r_batch, s_next_batch, tau_next_batch = batch
-
-        # Compute Q-values and target Q-values
-        q_values = self.q_net(tau_batch).gather(1, a_batch.unsqueeze(1)).squeeze()
+        q_total = self.mixer(agent_qs, state)
         with torch.no_grad():
-            next_q_values = self.target_net(tau_next_batch).max(1)[0]
-            target_q_values = r_batch + self.gamma * next_q_values
+            target_q_total = self.target_mixer(next_agent_qs, next_state)
+            targets = rewards + self.gamma * (1 - dones) * target_q_total
 
-        # Compute loss
-        loss = nn.functional.mse_loss(q_values, target_q_values)
+        loss = nn.MSELoss()(q_total, targets)
 
-        # Backpropagation
-        self.optimizer.zero_grad()
+        self.optim.zero_grad()
         loss.backward()
-        self.optimizer.step()
-
-        # Update epsilon
-        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-
-        # Update target network periodically
-        self.update_counter += 1
-        if self.update_counter % self.tarnet_update_frequency == 0:
-            self.target_net.load_state_dict(self.q_net.state_dict())
+        self.optim.step()
 
         return loss.item()
-    
 
-
-    
-
-
-
-
+    def update_target_network(self):
+        for i in range(self.n_agents):
+            self.target_qnets[i].load_state_dict(self.agent_qnets[i].state_dict())
+        self.target_mixer.load_state_dict(self.mixer.state_dict())

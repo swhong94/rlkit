@@ -271,7 +271,7 @@ class QLBT_gym(QLBT_DQNAgent):
     def act(self, observation):
         return super().act(observation)
 
-# if __name__ == "__main__":
+# if __name__ == "__main__":  # CSMA/CA agent test
 #     num_nodes = 5
 #     max_steps = 1000
 #     env = DCAEnv(num_nodes=num_nodes, max_steps=max_steps, render_mode='human')
