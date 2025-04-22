@@ -1,5 +1,5 @@
-import numpy as np 
-import random 
+import numpy as np
+import random
 
 
 class CSMA_CA_Agent: 
