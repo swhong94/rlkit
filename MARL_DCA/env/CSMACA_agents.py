@@ -4,7 +4,7 @@ import random
 
 class CSMA_CA_Agent: 
     """
-    CSMA-CA Agent for the CSMACA environment.
+    CSMA-CA Agent for the CSMA/CA environment.
     This agent implements the CSMA-CA protocol with two strategies: BEB (Binary Exponential Backoff) and Random Backoff.
     """
     
@@ -40,11 +40,11 @@ class CSMA_CA_Agent:
         return self.backoff_timer == 0
 
     def act(self, state):
-        channel_state, collision_occured = state # 현재 채널 상태, 충돌 발생 여부 
+        channel_state, collision_occured = state  # global state로부터 채널 상태, 충돌 발생 여부를 관찰  
         
         # Update backoff based on previous action and channel state
-        if self.action[0] == 1:  # 이전 액션이 전송 시도라면
-            self.reset_backoff(collision_occured=collision_occured) # 충돌 여부에 따라 backoff 재설정
+        if self.action[0] == 1:  # 전송 시도했을 때 충돌 발생 여부 부 확인 
+            self.reset_backoff(collision_occured=collision_occured)
         else:   # 이전 액션이 대기라면
             self.decrement_backoff() # 대기시간 감소
 

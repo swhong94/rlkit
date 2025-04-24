@@ -5,12 +5,10 @@ import matplotlib.colors as colors
 import random
 import sys
 import time
-from CSMACA_agents import CSMA_CA_Agent
-from QLBT_agents import QLBT_DQNAgent
-
-
+from env.CSMACA_agents import CSMA_CA_Agent
 if 'ipykernel' in sys.modules:
     from IPython import display
+
 
 '''
 DCAEnv: Distributed Channel Access Environment
@@ -22,16 +20,23 @@ DCAEnv: Distributed Channel Access Environment
 - The environment includes a reset method to initialize the state and a step method to update the state based on actions taken by the nodes.
 - The environment includes a render method to visualize the state of the network.
 '''
-class AccessPoint: 
+class AccessPoint: # CSMA/CA 환경의 AP는 simple하게 구현
+    """
+    Access Point (AP) for the CSMA/CA environment.
+    This class simulates the behavior of an access point in a CSMA/CA network.
+    It receives packets from nodes and determines the channel state (IDLE, ACK, COLLISION).
+    """
     # packet-sifs-ack
-    SIFS = 2
-    
     def __init__(self):
-        self.channel_busy = False   
+        self.channel_state = "IDLE"  # IDLE, ACK, COLLISION
+        self.channel_busy = False
         self.current_transmitter = None
-        self.sifs= self.SIFS
+        self.sifs= 2                # short inter-frame space
+        self.ack = 0                # number of ACKs
+        self.collision = 0          # number of collisions
+        self.success = 0            # number of successful transmissions
     
-    def receive(self, nodes): # 수신한 노드 리스트를 받아서 채널 상태 확인
+    def receive(self, nodes):   # 수신한 노드 리스트를 받아서 채널 상태 확인
         if len(nodes) > 1:
             return "COLLISION"  # Collision occurred
         elif len(nodes) == 1:
@@ -40,18 +45,19 @@ class AccessPoint:
             return "IDLE"       # No transmission
 
     def reset(self):
-        self.channel_busy = False
+        self.channel_state = "IDLE"
+        self.channel_busy = False ##채널 상태만 초기화 
 
 class DCAEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array", "ansi"], "render_fps": 10}  
-    RENDER_SLOTS = 50 # 최근 50 time slots
-    NOTEBOOK = 'ipykernel' in sys.modules # Check if running in Jupyter Notebook
+    RENDER_SLOTS = 50 
+    NOTEBOOK = 'ipykernel' in sys.modules 
     CHANNEL_STATE_MAP = {
         "IDLE": 0,
         "ACK": 1,
         "COLLISION": 2
     }
-
+    
     def __init__(self, num_nodes=5, max_steps=1000, render_mode=None):
         super().__init__() 
 
@@ -62,18 +68,18 @@ class DCAEnv(gym.Env):
         self.t = 0
 
         # Define action and observation spaces
-        self.action_space = gym.spaces.MultiBinary(num_nodes) # joint action space: agent to AP
+        self.action_space = gym.spaces.MultiBinary(num_nodes) # joint action space: 0 or 1 for each node
         
 
         # Observation space only includes channel state and collision info 
         self.observation_space = gym.spaces.Dict({    # joint observation space: AP to agent [channel state, D2LT]:MARL
-            "channel_state": gym.spaces.Discrete(3),  # 0=IDLE, 1=ACK, 2=COLLISION
-            "collision": gym.spaces.Discrete(2)       # 0=False, 1=True
+            "channel_state": gym.spaces.Discrete(3),  # 0=IDLE, 1=ACK, 2=COLLISION -> channel_state
+            "collision": gym.spaces.Discrete(2)       # 0=False, 1=True -> collision_occured
         })
 
-        # Hidden state (not directly observable -> QLBT) 
-        self.hidden_state = {   
-            "channel": "IDLE",      # Channel State
+        # Hidden state (not directly observable to agents) 
+        self.hidden_state = {  
+            "channel": "IDLE",        # Channel state 
             "ready_nodes": [],      # Ready Nodes
             "D2LT": [],             # Number of timeslots to last successful transmission
             "actions": [],          # Agent Actions 
@@ -84,12 +90,11 @@ class DCAEnv(gym.Env):
 
 
     def reset(self, ): # 환경 초기화
-        
         self.t = 0
         self.access_point.reset()
         self.d2lt = np.zeros(self.num_nodes) 
         self.others = np.zeros(self.num_nodes) 
-        self.hidden_state = {"channel": "IDLE", 
+        self.hidden_state = {"channel": "IDLE",
                              "ready_nodes": [], 
                              "D2LT": self.d2lt, 
                              "actions": [0] * self.num_nodes, 
@@ -108,7 +113,8 @@ class DCAEnv(gym.Env):
         channel = self.access_point.receive(ready_nodes)    # AP에 전송시도 노드 전달해서 채널 상태 확인
         self.d2lt = self.d2lt + 1   
         self.others = np.zeros(self.num_nodes) 
-
+        # for i in range(self.num_nodes):
+        #     self.others[i] = np.sum([actions[j] for j in range(self.num_nodes) if j != i])  # Exclude the agent's own action
         
         # Compute reward 
         reward = self._compute_reward(channel, ready_nodes) #채널 상태와 전송 시도 노드에 따라 보상 계산
@@ -118,9 +124,9 @@ class DCAEnv(gym.Env):
             "D2LT": self.d2lt, 
             "actions": actions,
             "others": self.others,
-        } 
+        }
 
-        # Get observation 
+        # Get observation from AP to agent
         observation = self._get_obs() 
 
         # Update time and termination conditions 
@@ -151,7 +157,7 @@ class DCAEnv(gym.Env):
         return observation, reward, terminated, truncated, info
 
 
-    def _get_obs(self, ): 
+    def _get_obs(self, ): # agent가 받는 관측값 
         channel = self.hidden_state["channel"]
         channel_state = self.CHANNEL_STATE_MAP[channel]
 
@@ -178,7 +184,6 @@ class DCAEnv(gym.Env):
         else: # channel == 'IDLE'
             self.others = np.zeros(self.num_nodes)
         return 0.0
-
 
     def render(self):
         if not self.render_mode:
@@ -241,7 +246,6 @@ class DCAEnv(gym.Env):
             'collision': 0,
             'cumsum_success': [],
             'cumsum_collision': [],
-            'throughput': 0,
         }
 
 
@@ -261,87 +265,87 @@ class CSMA_gym(CSMA_CA_Agent):
         action = super().act(observation) 
         return action[0]
 
-class QLBT_gym(QLBT_DQNAgent):
-    """
-    Returns int action instead of tensor or list
-    """
-    def __init__(self, agent_id, obs_dim=2, action_dim=2, **kwargs):
-        super().__init__(agent_id=agent_id, obs_dim=obs_dim, action_dim=action_dim, **kwargs)
+# class QLBT_gym(QLBT_DQNAgent):
+#     """
+#     Returns int action instead of tensor or list
+#     """
+#     def __init__(self, agent_id, obs_dim=2, action_dim=2, **kwargs):
+#         super().__init__(agent_id=agent_id, obs_dim=obs_dim, action_dim=action_dim, **kwargs)
 
-    def act(self, observation):
-        return super().act(observation)
+#     def act(self, observation):
+#         return super().act(observation)
 
-# if __name__ == "__main__":  # CSMA/CA agent test
-#     num_nodes = 5
-#     max_steps = 1000
-#     env = DCAEnv(num_nodes=num_nodes, max_steps=max_steps, render_mode='human')
-#     agents = [CSMA_gym(i, cw_min=2, cw_max=16) for i in range(num_nodes)]
-    
-#     total_reward = 0
-
-#     observation, _ = env.reset() 
-#     actions_csma = np.array([agent.act(observation) for agent in agents])
- 
-#     for _ in range(max_steps):
-#         action = np.array([agent.act(observation) for agent in agents])
-#         next_obs, reward, terminated, truncated, info = env.step(action) 
-#         env.render()
-#         total_reward += reward
-#         observation = next_obs
-#         if terminated or truncated:
-#             break
-    
-#     if not env.NOTEBOOK:
-#         plt.show()
-
-#     print(f"average episode reward (CSMA): {total_reward / max_steps}")
-
-
-if __name__ == "__main__":
+if __name__ == "__main__":  # CSMA/CA agent test
     num_nodes = 5
     max_steps = 1000
-    agent_type = 'QLBT'  # or 'CSMA'
-
     env = DCAEnv(num_nodes=num_nodes, max_steps=max_steps, render_mode='human')
-
-    if agent_type == 'CSMA':
-        agents = [CSMA_gym(i, cw_min=2, cw_max=16) for i in range(num_nodes)]
-    else:
-        agents = [QLBT_gym(i) for i in range(num_nodes)]
-
-    obs, _ = env.reset()
+    agents = [CSMA_gym(i, cw_min=2, cw_max=16) for i in range(num_nodes)]
+    
     total_reward = 0
 
-    for t in range(max_steps):
-        actions = np.array([agent.act(obs) for agent in agents])
-        next_obs, reward, terminated, truncated, info = env.step(actions)
-
-        # QLBT일 경우 학습
-        if agent_type == 'QLBT':
-            if reward == 1.0:
-                winner = info["hidden_state"]["ready_nodes"][0]
-                for i, agent in enumerate(agents):
-                    r = 1.0 if i == winner else 0.0
-                    agent.store(next_obs, r)
-            elif reward == -1.0:
-                for i, agent in enumerate(agents):
-                    r = -1.0 if i in info["hidden_state"]["ready_nodes"] else 0.0
-                    agent.store(next_obs, r)
-            else:
-                for agent in agents:
-                    agent.store(next_obs, 0.0)
-            for agent in agents:
-                agent.learn()
-
-        obs = next_obs
+    observation, _ = env.reset() 
+    actions_csma = np.array([agent.act(observation) for agent in agents])
+ 
+    for _ in range(max_steps):
+        action = np.array([agent.act(observation) for agent in agents])
+        next_obs, reward, terminated, truncated, info = env.step(action) 
+        env.render()
         total_reward += reward
-
-        env.render()  # 🔥 그래픽 시각화
-
-        if terminated or truncated:
+        observation = next_obs
+        if terminated or truncated: #window+c -> 종료 
             break
 
     if not env.NOTEBOOK:
         plt.show()
 
-    print(f"✅ average episode reward ({agent_type}): {total_reward / max_steps:.3f}")
+    print(f"average episode reward (CSMA): {total_reward / max_steps}")
+
+
+# if __name__ == "__main__":
+#     num_nodes = 5
+#     max_steps = 10C00
+#     agent_type = 'QLBT'  # or 'CSMA'
+
+#     env = DCAEnv(num_nodes=num_nodes, max_steps=max_steps, render_mode='human')
+
+#     if agent_type == 'CSMA':
+#         agents = [CSMA_gym(i, cw_min=2, cw_max=16) for i in range(num_nodes)]
+#     else:
+#         agents = [QLBT_gym(i) for i in range(num_nodes)]
+
+#     obs, _ = env.reset()
+#     total_reward = 0
+
+#     for t in range(max_steps):
+#         actions = np.array([agent.act(obs) for agent in agents])
+#         next_obs, reward, terminated, truncated, info = env.step(actions)
+
+#         # QLBT일 경우 학습
+#         if agent_type == 'QLBT':
+#             if reward == 1.0:
+#                 winner = info["hidden_state"]["ready_nodes"][0]
+#                 for i, agent in enumerate(agents):
+#                     r = 1.0 if i == winner else 0.0
+#                     agent.store(next_obs, r)
+#             elif reward == -1.0:
+#                 for i, agent in enumerate(agents):
+#                     r = -1.0 if i in info["hidden_state"]["ready_nodes"] else 0.0
+#                     agent.store(next_obs, r)
+#             else:
+#                 for agent in agents:
+#                     agent.store(next_obs, 0.0)
+#             for agent in agents:
+#                 agent.learn()
+
+#         obs = next_obs
+#         total_reward += reward
+
+#         env.render()  # 🔥 그래픽 시각화
+
+#         if terminated or truncated:
+#             break
+
+#     if not env.NOTEBOOK:
+#         plt.show()
+
+#     print(f"✅ average episode reward ({agent_type}): {total_reward / max_steps:.3f}")
