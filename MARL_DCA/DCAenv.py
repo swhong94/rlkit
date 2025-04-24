@@ -265,15 +265,6 @@ class CSMA_gym(CSMA_CA_Agent):
         action = super().act(observation) 
         return action[0]
 
-# class QLBT_gym(QLBT_DQNAgent):
-#     """
-#     Returns int action instead of tensor or list
-#     """
-#     def __init__(self, agent_id, obs_dim=2, action_dim=2, **kwargs):
-#         super().__init__(agent_id=agent_id, obs_dim=obs_dim, action_dim=action_dim, **kwargs)
-
-#     def act(self, observation):
-#         return super().act(observation)
 
 if __name__ == "__main__":  # CSMA/CA agent test
     num_nodes = 5
@@ -301,51 +292,3 @@ if __name__ == "__main__":  # CSMA/CA agent test
     print(f"average episode reward (CSMA): {total_reward / max_steps}")
 
 
-# if __name__ == "__main__":
-#     num_nodes = 5
-#     max_steps = 10C00
-#     agent_type = 'QLBT'  # or 'CSMA'
-
-#     env = DCAEnv(num_nodes=num_nodes, max_steps=max_steps, render_mode='human')
-
-#     if agent_type == 'CSMA':
-#         agents = [CSMA_gym(i, cw_min=2, cw_max=16) for i in range(num_nodes)]
-#     else:
-#         agents = [QLBT_gym(i) for i in range(num_nodes)]
-
-#     obs, _ = env.reset()
-#     total_reward = 0
-
-#     for t in range(max_steps):
-#         actions = np.array([agent.act(obs) for agent in agents])
-#         next_obs, reward, terminated, truncated, info = env.step(actions)
-
-#         # QLBT일 경우 학습
-#         if agent_type == 'QLBT':
-#             if reward == 1.0:
-#                 winner = info["hidden_state"]["ready_nodes"][0]
-#                 for i, agent in enumerate(agents):
-#                     r = 1.0 if i == winner else 0.0
-#                     agent.store(next_obs, r)
-#             elif reward == -1.0:
-#                 for i, agent in enumerate(agents):
-#                     r = -1.0 if i in info["hidden_state"]["ready_nodes"] else 0.0
-#                     agent.store(next_obs, r)
-#             else:
-#                 for agent in agents:
-#                     agent.store(next_obs, 0.0)
-#             for agent in agents:
-#                 agent.learn()
-
-#         obs = next_obs
-#         total_reward += reward
-
-#         env.render()  # 🔥 그래픽 시각화
-
-#         if terminated or truncated:
-#             break
-
-#     if not env.NOTEBOOK:
-#         plt.show()
-
-#     print(f"✅ average episode reward ({agent_type}): {total_reward / max_steps:.3f}")
