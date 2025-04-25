@@ -2,11 +2,11 @@ import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
-import random
 import sys
 import time
 import torch
-from env.QLBT_agents import QLBT_AP
+from env.QLBT_agents import QLBT_Agent, QLBT_AP
+
 if 'ipykernel' in sys.modules:
     from IPython import display
 
@@ -43,15 +43,23 @@ class QLBT_DCAEnv(gym.Env):
         "COLLISION": 2
     }
 
-    def __init__(self, num_nodes=5, max_steps=1000, render_mode=None):
+    def __init__(self, trainer: QLBT_AP, max_steps=1000, render_mode=None):
         super().__init__()
-        self.num_nodes = num_nodes
+        self.num_nodes = trainer.n_agents
         self.max_steps = max_steps
+        self.device = trainer.device
         self.access_point = AccessPoint()
-        self.t =0
-        self.d2lt = np.zeros(num_nodes)
-        self.joint_action = np.zeros(num_nodes)
-        self.success_count = np.zeros(num_nodes)
+        self.t = 0
+        self.d2lt = np.zeros(self.num_nodes)
+        self.joint_action = np.zeros(self.num_nodes)
+        self.success_count = np.zeros(self.num_nodes)
+        self.render_mode=render_mode
+        self.trainer = trainer
+        self.agents = trainer.agent_nets
+
+        for agent in self.agents:
+            agent.reset_hidden(bs=1)
+
         self._initialize_render_data()
 
     def reset(self): # 환경 초기화
@@ -60,26 +68,28 @@ class QLBT_DCAEnv(gym.Env):
         self.d2lt = np.zeros(self.num_nodes)
         self.joint_action = np.zeros(self.num_nodes)
         self.success_count = np.zeros(self.num_nodes)
+        for agent in self.agents:
+            agent.reset_hidden(bs=1)
         self._initialize_render_data()
         return self._get_obs(), {} # 관측값과 정보 리턴
 
     def step(self, actions): # 액션에 따라 환경 상태 업데이트
         self.joint_action = np.array(actions)
-        ready_nodes = np.where(np.array(actions)==1)[0].tolist()
+        ready_nodes = np.where(self.joint_action == 1)[0].tolist()
         channel=self.access_point.receive(ready_nodes) # 채널 상태 확인
 
         rwd_tot, rwd_ind = self._compute_reward(channel, ready_nodes) # 보상 계산
-        self.t +=1
-        self.d2lt +=1 ###################### 패킷 전송 성공한 노드는 0으로 리셋 필요
+        self.t += 1
+        self.d2lt += 1 ###################### 패킷 전송 성공한 노드는 0으로 리셋 필요
 
         if channel == "ACK":
             winner = ready_nodes[0]
             self.d2lt[winner] = 0
 
         obs = self._get_obs() # 관측값 업데이트
-        info = {"ready nodes": ready_nodes, "channel": channel}
         done = self.t >= self.max_steps
-
+        info = {"ready nodes": ready_nodes, "channel": channel}
+        
         # Update render data
         self.state_data = np.zeros((self.num_nodes, 1))
         if channel == 'ACK':
@@ -212,58 +222,56 @@ class QLBT_DCAEnv(gym.Env):
         }
 
 
-class QLBT_gym(QLBT_AP):
-    def __init__(self, n_agents, obs_dim, state_dim, hidden_dim=32, buffer_size=10000, batch_size=32, gamma=0.99, lr=0.001, device=None):
-        super().__init__(n_agents=n_agents, obs_dim=obs_dim, state_dim=state_dim, hidden_dim=hidden_dim,
-                         buffer_size=buffer_size, batch_size=batch_size, gamma=gamma, lr=lr, device=device)
-        self.hidden_states = [agent.init_hidden(bs=1) for agent in self.agent_nets]
-
-    def act(self, observations):
-        actions = []
-        for i in range(self.n_agents):
-            obs_tensor = torch.tensor(observations[i], dtype=torch.float32).to(self.device)
-            action = self.agent_nets[i].select_action(obs_tensor)
-            actions.append(action)
-        return actions
-
-    def store_experience(self, state, obs, action, reward, next_state, next_obs, done):
-        self.replay_buffer.push(state, obs, action, reward, next_state, next_obs, done)
-
-    def update(self):
-        return self.train()
-
-
-
 if __name__ == "__main__":
     
     num_nodes = 5
     max_steps = 1000
     obs_dim = num_nodes + 2  # [channel_state, own_d2lt, others_d2lt...]
-    state_dim = 1 + num_nodes + num_nodes  # [channel_state, success_ratio, joint_action, d2lt]
+    state_dim = 1 + 3 * num_nodes  # [channel_state, success_ratio, joint_action, d2lt]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    env = QLBT_DCAEnv(num_nodes=num_nodes, max_steps=max_steps, render_mode='human')
-    agent = QLBT_gym(num_nodes, obs_dim=obs_dim, state_dim=state_dim, device=device)
+
+    trainer = QLBT_AP(
+        n_agents=num_nodes,
+        obs_dim=obs_dim,
+        state_dim=state_dim,
+        hidden_dim = 64,
+        buffer_size=5000,
+        batch_size=64,
+        gamma=0.99,
+        lr=0.001,
+        device=device
+    )
+    env = QLBT_DCAEnv(trainer, max_steps=max_steps, render_mode='human')
+    # agent = QLBT_gym(num_nodes, obs_dim=obs_dim, state_dim=state_dim, device=device)
 
     total_reward = 0
-    observation, _ = env.reset()
+    obs, _ = env.reset()
 
     for t in range(max_steps):
-        actions = agent.act(observation)
-        next_obs, (reward_total, reward_ind), done, _, info = env.step(actions)
+        actions = [agent.select_action(obs[i]) for i, agent in enumerate(env.agents)]
+        next_obs, (r_tot, r_ind), done, _, _ = env.step(actions)
 
         state = torch.tensor(env.get_state(), dtype=torch.float32).to(device)
         next_state = torch.tensor(env.get_state(), dtype=torch.float32).to(device)
 
-        for i in range(num_nodes):
-            obs_tensor = torch.tensor(observation[i], dtype=torch.float32).unsqueeze(0).to(device)
-            next_obs_tensor = torch.tensor(next_obs[i], dtype=torch.float32).unsqueeze(0).to(device)
-            agent.store_experience(state, obs_tensor, actions[i], reward_ind[i], next_state, next_obs_tensor, done)
+        obs_tensor = [torch.tensor(o, dtype=torch.float32) for o in obs]
+        next_obs_tensor = [torch.tensor(o, dtype=torch.float32) for o in next_obs]
+        hidden_tensor = [agent.hidden_state.detach().squeeze(0) for agent in env.agents]
 
-        agent.update()
-        observation = next_obs
-        total_reward += reward_total
+        trainer.store_transition((
+            state,obs_tensor,hidden_tensor,actions, r_tot,r_ind,
+            next_state, next_obs_tensor, hidden_tensor, done
+        ))
+        # for i in range(num_nodes):
+        #     obs_tensor = torch.tensor(obs[i], dtype=torch.float32)
+        #     next_obs_tensor = torch.tensor(next_obs[i], dtype=torch.float32)
+        #     trainer.store_transition((state, obs_tensor, env.agents[i].hidden_state.detach(), actions[i],
+        #                                r_tot, r_ind, next_state, next_obs_tensor, env.agents[i].hidden_state.detach(), done))
 
+        trainer.train()
+        obs = next_obs
+        total_reward += r_tot
         env.render()
         if done:
             break
