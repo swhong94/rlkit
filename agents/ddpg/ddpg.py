@@ -10,40 +10,6 @@ from utils import ReplayBuffer, OUNoise
 from agents.ddpg.network import Actor, Critic 
 from utils import Logger 
 
-
-    
-
-# class ReplayBuffer: 
-#     def __init__(self, capacity): 
-#         self.buffer = deque(maxlen=capacity) 
-
-#     def add(self, state, action, reward, next_state, done): 
-#         self.buffer.append((state, action, reward, next_state, done)) 
-
-#     def sample(self, batch_size): 
-#         batch = random.sample(self.buffer, batch_size)
-#         state, action, reward, next_state, done = zip(*batch)
-#         return (np.array(state), np.array(action), np.array(reward), np.array(next_state), np.array(done)) 
-    
-#     def __len__(self):
-#         return len(self.buffer) 
-    
-
-# class OUNoise:
-#     def __init__(self, action_dim, mu=0.0, theta=0.15, sigma=0.2): 
-#         self.mu = mu * np.ones(action_dim) 
-#         self.theta = theta 
-#         self.sigma = sigma 
-#         self.reset() 
-
-#     def reset(self): 
-#         self.state = self.mu 
-
-#     def sample(self): 
-#         x = self.state 
-#         dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(len(x)) 
-#         self.state = x + dx 
-#         return self.state 
     
 
 
@@ -200,87 +166,6 @@ class DDPG(nn.Module):
 
 
 
-
-# # Hyperparameters 
-# class Actor(nn.Module): 
-#     """ 
-#     MLP for policy network
-#     """
-#     def __init__(self, 
-#                  input_dim, 
-#                  hidden_dims, 
-#                  output_dim, 
-#                  max_action,
-#                  activation="ReLU"):
-#         super(Actor, self).__init__() 
-    
-#         # Create list of layers
-#         layers = []
-#         prev_dim = input_dim
-        
-#         # Add hidden layers
-#         for h_dim in hidden_dims:
-#             layers.append(nn.Linear(prev_dim, h_dim))
-#             layers.append(getattr(nn, activation)())
-#             prev_dim = h_dim
-#         layers.append(nn.Linear(prev_dim, output_dim))
-#         layers.append(nn.Tanh())
-#         # Mean and std heads for the policy
-#         self.fc_net = nn.Sequential(*layers)
-#         self.max_action = max_action
-    
-#     def forward(self, x): 
-#         return self.max_action * self.fc_net(x)
-
-
-# class Critic(nn.Module): 
-#     def __init__(self, input_dim, hidden_dims, output_dim, activation="ReLU"):
-#         super(Critic, self).__init__() 
-#         layers = [] 
-#         prev_dim = input_dim + output_dim
-#         for h_dim in hidden_dims: 
-#             layers.append(nn.Linear(prev_dim, h_dim)) 
-#             layers.append(getattr(nn, activation)())
-#             prev_dim = h_dim 
-#         layers.append(nn.Linear(prev_dim, 1))
-
-#         self.fc_net = nn.Sequential(*layers)
-    
-#     def forward(self, state, action): 
-#         return self.fc_net(torch.cat([state, action], dim=1)) 
-
-
-
-# class Actor(nn.Module):
-#     def __init__(self, state_dim, hidden_dims, action_dim, max_action):
-#         super(Actor, self).__init__() 
-#         self.fc_net = nn.Sequential(
-#             nn.Linear(state_dim, 256), 
-#             nn.ReLU(), 
-#             nn.Linear(256, 256), 
-#             nn.ReLU(),
-#             nn.Linear(256, action_dim),
-#             nn.Tanh()
-#         )
-#         self.max_action = max_action 
-    
-#     def forward(self, state):
-#         return self.max_action * self.fc_net(state) 
-    
-
-# class Critic(nn.Module):
-#     def __init__(self, state_dim, hidden_dims, action_dim):
-#         super(Critic, self).__init__() 
-#         self.fc_net = nn.Sequential(
-#             nn.Linear(state_dim + action_dim, 256),
-#             nn.ReLU(), 
-#             nn.Linear(256, 256), 
-#             nn.ReLU(),
-#             nn.Linear(256, 1) 
-#         )
-
-#     def forward(self, state, action):
-#         return self.fc_net(torch.cat([state, action], dim=1))
 
 if __name__ == "__main__": 
     env = gym.make("Pendulum-v1") 

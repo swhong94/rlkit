@@ -19,6 +19,22 @@ class OUNoise:
         return self.state 
     
 
+class EpsilonGreedy: 
+    def __init__(self, 
+                 epsilon_start=1.0,
+                 epsilon_end=0.01, 
+                 epsilon_decay=0.995): 
+        self.epsilon = epsilon_start 
+        self.epsilon_end = epsilon_end 
+        self.epsilon_decay = epsilon_decay 
+
+    def sample(self, ): 
+        return np.random.rand() < self.epsilon 
+    
+    def decay(self, ): 
+        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
+
+
 
 
 

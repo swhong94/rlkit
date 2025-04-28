@@ -1,260 +1,178 @@
-# agents/dqn.py
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-import gymnasium as gym
-import os 
-# from models.mlp import PolicyNet
+import torch 
+import torch.nn as nn 
+import torch.optim as optim 
+import numpy as np 
+import gymnasium as gym 
 
-from .network import ValueNetwork
-from utils import Logger, ReplayBuffer
+from .network import QNetwork, DuelingQNetwork 
+from utils.noise import EpsilonGreedy 
+from utils.replay_buffer import ReplayBuffer, PrioritizedReplayBuffer 
+from utils.logger import Logger 
 
 
-class DQN(nn.Module): 
-    """
-    A DQN agent with experience replay with target network 
-    
-    Args: 
-        env (gym.Env): environment to train on 
-        hidden_dims (list): list of hidden dimensions for the MLP 
-        lr (float): learning rate 
-        gamma (float): discount factor 
-        epsilon_start (float): starting epsilon for epsilon-greedy policy 
-        epsilon_end (float): ending epsilon for epsilon-greedy policy 
-        epsilon_decay (float): decay steps for epsilon  
-        buffer_size (int): size of the replay buffer 
-        batch_size (int): batch size for training 
-        target_update_frequency (int): interval for updating the target network 
-        log_dir (str): directory to save the logs 
-        plot_window (int): window size for the plot (moving average) 
-        device (str): device to run the model on ('cpu' or 'cuda') <- not used yet 
-    """
-    def __init__(self, 
-                 env, 
-                 hidden_dims=[128, 128], lr=1e-3, gamma=0.99,
-                 epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=10000, 
-                 buffer_size=10000, batch_size=64, target_update_frequency=1000, max_steps=200,
-                 log_dir="logs/dqn_logs", plot_window=None, device='cpu'): 
-        super(DQN, self).__init__() 
+class DQN: 
+    def __init__(self, env, hidden_dims=[128, 128], lr=1e-4, gamma=0.99, tau=0.004, capacity=10000, 
+                 batch_size=64, episode_length=200, log_dir='logs/dqn_logs', plot_window=None, device='cpu', 
+                 per=False, dueling_dqn=False, double_dqn=False): 
+        self.device = device 
 
+        # Define Environment 
         self.env = env 
         self.state_dim = env.observation_space.shape[0] 
-        assert isinstance(env.action_space, gym.spaces.Discrete), "Action space must be discrete for DQN"
         self.action_dim = env.action_space.n 
 
-        self.q_network = ValueNetwork(self.state_dim, hidden_dims, self.action_dim, activation="ReLU") 
-        self.target_network = ValueNetwork(self.state_dim, hidden_dims, self.action_dim, activation="ReLU") 
+        # Initialize Networks 
+        q_network = DuelingQNetwork if dueling_dqn else QNetwork 
+        self.q_network = q_network(self.state_dim, hidden_dims, self.action_dim).float().to(device) 
+        self.target_q_network = q_network(self.state_dim, hidden_dims, self.action_dim).float().to(device) 
+        self.target_q_network.load_state_dict(self.q_network.state_dict()) 
 
-        # Initialize target network with same weights as q_network 
-        self.target_network.load_state_dict(self.q_network.state_dict()) 
-        self.target_network.eval()  # Set target_network to evaluation mode to avoid training 
+        # optimizer 
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)  
 
-        # Optimizer 
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr) 
+        # Buffer 
+        self.buffer = PrioritizedReplayBuffer(capacity=capacity) if per else ReplayBuffer(capacity=capacity) 
 
-        # Training parameters 
+        # Exploration Strategy: Epsilon Greedy 
+        self.exploration = EpsilonGreedy()
+
+        # Parameters and options 
         self.gamma = gamma 
-        self.epsilon = epsilon_start 
-        self.epsilon_start = epsilon_start 
-        self.epsilon_end = epsilon_end  
-        self.epsilon_decay = epsilon_decay 
+        self.tau = tau 
         self.batch_size = batch_size 
-        self.max_steps = max_steps 
+        self.episode_length = episode_length 
+        self.double_dqn = double_dqn 
+        self.dueling_dqn = dueling_dqn 
+        self.per = per 
+        # Logging infos 
+        self.logger = Logger(log_dir=log_dir, log_name_prefix='DQN', plot_window=plot_window) 
         self.timestamp = 0 
-        self.tuf = target_update_frequency  
-        self.gradient_clipping = True 
-
-        # initialize replay buffer 
-        self.replay_buffer = ReplayBuffer(capacity=buffer_size)  
-
-        # Initialize logger 
-        self.logger = Logger(log_dir, log_name_prefix="dqn", plot_window=plot_window) 
-
-        # Initialize device 
-        self.device = device 
-        self.to(device) 
-
 
     def act(self, state, explore=True): 
-        """Select an action given the current state with epsilon-greedy policy"""
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device) 
-        if explore and (np.random.rand() < self.epsilon):    # Exploration
-            action = np.random.choice(self.action_dim) 
-        else: 
-            with torch.no_grad():                            # Greedy action 
-                q_values = self.q_network(state_tensor) 
-                action = q_values.argmax(dim=1).item()
-        return action 
-    
-    def update_epsilon(self): 
-        """Decay epsilon overtime"""    
-        self.epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
-                        np.exp(-1.0 * self.timestamp / self.epsilon_decay) 
-    
+        if explore and self.exploration.sample(): 
+            return self.env.action_space.sample() 
+        state = torch.FloatTensor(state).unsqueeze(0).to(self.device) 
+        with torch.no_grad(): 
+            q_values = self.q_network(state) 
+        return q_values.argmax().item() 
 
     def train_step(self, ): 
-        """Training process for a single step""" 
-        if len(self.replay_buffer) < self.batch_size: 
-            return 0.0, 0.0 
-        
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size) 
+        if len(self.buffer) < self.batch_size: 
+            return 0.0 
+
+        # Sample batch 
+        if self.per: 
+            states, actions, rewards, next_states, dones, indices, weights = self.buffer.sample(self.batch_size) 
+            weights= torch.FloatTensor(weights).to(self.device) 
+        else: 
+            states, actions, rewards, next_states, dones = self.buffer.sample(self.batch_size) 
+            weights = torch.ones(self.batch_size).to(self.device) 
+
         states = torch.FloatTensor(states).to(self.device) 
-        actions = torch.LongTensor(actions).to(self.device) 
-        rewards = torch.FloatTensor(rewards).to(self.device).unsqueeze(1) 
+        actions = torch.LongTensor(actions).unsqueeze(1).to(self.device) 
+        rewards = torch.FloatTensor(rewards).unsqueeze(1).to(self.device) 
         next_states = torch.FloatTensor(next_states).to(self.device) 
         dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device) 
 
-        # Compute Q-values 
-        q_vals = self.q_network(states).gather(1, actions.unsqueeze(1))      # Gathers Q-values matching the actions (like indexing)
-        
-        # Compute target Q-values
         with torch.no_grad(): 
-            next_q_vals = self.target_network(next_states).max(dim=1)[0].unsqueeze(1) 
-            targets = rewards + self.gamma * (1-dones) * next_q_vals 
-        
+            if self.double_dqn: 
+                next_actions = self.q_network(next_states).argmax(dim=1, keepdim=True) 
+                target_q_values = self.target_q_network(next_states).gather(1, next_actions) 
+            else:
+                target_q_values = self.target_q_network(next_states).max(dim=1, keepdim=True)[0]
+            target_q = rewards + self.gamma * (1-dones) * target_q_values 
+
+        # Compute Current Q-vals 
+        current_q = self.q_network(states).gather(1, actions) 
+
         # Compute Loss 
-        loss = nn.MSELoss()(q_vals, targets) 
+        loss = (weights * (current_q - target_q)**2).mean() 
 
         # Optimize 
         self.optimizer.zero_grad() 
         loss.backward() 
-        # Gradient clipping 
-        if self.gradient_clipping: 
-            nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
         self.optimizer.step() 
 
-        # Update target network 
-        self.timestamp += 1  
-        if self.timestamp % self.tuf == 0: 
-            self.target_network.load_state_dict(self.q_network.state_dict())
+        if self.per: 
+            td_errors = (current_q - target_q).abs().detach().cpu().numpy().flatten() 
+            self.buffer.update_priorities(indices, td_errors) 
         
-        return loss.item(), 0.0   # placeholder for critic loss 
+        # Soft update target network 
+        for param, target_param in zip(self.q_network.parameters(), self.target_q_network.parameters()): 
+            target_param.data.copy_(self.tau * param.data + (1.0 - self.tau) * target_param.data) 
 
+        self.timestamp += 1
 
+        return loss.item() 
 
-    def train_episode(self ): 
-        """Training process for a single episode"""
+    def train_episode(self, ): 
         state, _ = self.env.reset() 
-        total_reward = 0 
-        total_loss = 0 
-        steps = 0 
+        episode_reward, total_loss = 0, 0 
+        step = 0 
 
-        for t in range(self.max_steps): 
+        for t in range(self.episode_length): 
             action = self.act(state) 
-            next_state, reward, done, truncated, info = self.env.step(action)  
+            next_state, reward, done, truncated, info = self.env.step(action) 
+            self.buffer.add(state, action, reward, next_state, (done or truncated)) 
 
-            # Store transition in replay buffer 
-            self.replay_buffer.add(state, action, reward, next_state, float(done or truncated))
-
-            # Update
-            loss, _ = self.train_step()
-
-            total_reward += reward 
-            total_loss += loss 
-            steps += 1 
-
-            # Update state 
+            loss = self.train_step() 
             state = next_state 
-            # Update epsilon 
-            self.update_epsilon() 
+            episode_reward += reward 
+            total_loss += loss 
+            step += 1 
 
             if done or truncated: 
                 break 
-        
-        avg_loss = total_loss / steps 
-        return total_reward, avg_loss, 0.0 # Placeholder for critic loss 
+        self.exploration.decay() 
+        avg_loss = total_loss / max(step, 1) 
 
+        return episode_reward, avg_loss 
 
-
-
-    
-    def train(self, num_episodes, max_timesteps, log_interval=100, save_interval=100): 
-        """Train loop for the DQN agent"""
-        self.max_timesteps = max_timesteps 
+    def train(self, num_episodes, max_timesteps, log_interval=100, save_interval=None): 
         for episode in range(num_episodes): 
-            total_reward, avg_loss, _ = self.train_episode() 
+            episode_reward, avg_loss = self.train_episode() 
+
             if episode % log_interval == 0: 
-                self.logger.info(f"Episode(steps) {episode:>4d}({self.timestamp:>7d}) | Reward: {total_reward:>10.2f} "
-                                 f"Loss: {avg_loss:>10.4f} | Epsilon: {self.epsilon:>6.4f}")
+                self.logger.info(f"Episode[step] {episode:>4d}[{self.timestamp:>6d}] | "
+                                 f"Reward: {episode_reward:>10.3f} | "
+                                 f"Avg Loss: {avg_loss:>10.3f} ")
             metrics = {
-                "total_reward": total_reward, 
+                "episode_reward": episode_reward, 
                 "avg_loss": avg_loss, 
-                "epsilon": self.epsilon,
             }
-            self.logger.log_metrics(episode, metrics)
-
-            if episode % save_interval == 0 and episode > 0:
-                self.save(f"checkpoints/dqn/dqn_checkpoint_{episode}.pth")
-        self.logger.close()  
-
+            self.logger.log_metrics(episode, metrics) 
+        self.logger.close() 
 
     def save(self, path): 
-        """Save the model to a file"""
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        torch.save({
-            "q_network_state_dict": self.q_network.state_dict(), 
-            "target_network_state_dict": self.target_network.state_dict(), 
-            "optimizer":  self.optimizer.state_dict(), 
-            "timestamp": self.timestamp,
-            "epsilon": self.epsilon, 
-        }, path)
-
+        pass 
 
     def load(self, path): 
-        """Load the model from a file"""
-        checkpoint = torch.load(path, map_location=self.device) 
-        self.q_network.load_state_dict(checkpoint["q_network_state_dict"]) 
-        self.target_network.load_state_dict(checkpoint["target_network_state_dict"]) 
-        self.optimizer.load_state_dict(checkpoint["optimizer"]) 
-        self.timestamp = checkpoint["timestamp"]
-        self.epsilon = checkpoint["epsilon"]
+        pass 
 
     def evaluate(self, num_episodes, max_timesteps): 
-        """Evaluate the agent's performance (without exploration)"""
-        total_rewards = [] 
-        for _ in range(num_episodes): 
-            state, _ = self.env.reset() 
-            episode_reward = 0 
-            for _ in range(max_timesteps): 
-                action = self.act(state, explore=False) 
-                next_state, reward, done, truncated, info = self.env.step(action) 
-                episode_reward += reward 
-                state = next_state 
-
-                if done or truncated: 
-                    break 
-            total_rewards.append(episode_reward) 
-        return np.mean(total_rewards) 
-
-
+        pass 
 
 
 if __name__ == "__main__": 
     env = gym.make("CartPole-v1") 
-    agent = DQN(env=env, 
-                hidden_dims=[64, 64], 
-                lr=1e-3, 
-                gamma=0.99, 
-                epsilon_start=1.0, 
-                epsilon_end=0.01, 
-                epsilon_decay=10000,
-                buffer_size=10000, 
-                batch_size=64, 
-                target_update_frequency=100, 
-                max_steps=200, 
-                log_dir="logs/dqn_logs", 
-                plot_window=100, 
-                device='cpu')
-    
-    num_episodes = 2000
-    max_timesteps = 200
-    log_interval = 10 
+    agent = DQN(
+        env=env, 
+        hidden_dims=[128, 128], 
+        gamma=0.99, 
+        tau=0.005, 
+        lr=1e-4, 
+        capacity=10000, 
+        batch_size=64, 
+        log_dir='logs/dqn_logs', 
+        plot_window=30, 
+        double_dqn=True, 
+        dueling_dqn=False, 
+        per=True, 
+    )
 
-    agent.train(num_episodes, max_timesteps, log_interval) 
-    mean_reward = agent.evaluate(num_episodes=1, 
-                                 max_timesteps=max_timesteps)
-    print(f"Mean reward: {mean_reward:>10.2f}")
-
+    agent.train(
+        num_episodes=500, 
+        max_timesteps=10000,  
+        log_interval=10, 
+        save_interval=100, 
+    )

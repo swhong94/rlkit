@@ -468,7 +468,7 @@ if __name__ == "__main__":
     num_agents = 3
     num_cycles = 1000
     packet_length = 10
-    render_mode = "ansi"
+    render_mode = "human"
     env = DCAEnv(num_agents=num_agents, max_cycles=num_cycles, packet_length=packet_length, render_mode=render_mode) 
 
     legacy_agents = {f"agent_{i}": CSMA_CA_Agent(i, cw_min=2, cw_max=32) for i in range(num_agents)}
