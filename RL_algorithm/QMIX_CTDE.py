@@ -4,23 +4,8 @@ import torch.optim as optim
 import numpy as np
 import random
 from collections import deque, namedtuple
-from pettingzoo.butterfly import pistonball_v6
-import supersuit as ss
-'''
-QMIX: A Deep Reinforcement Learning Algorithm for Multi-Agent Systems
-- Mixing Network: Monotonic Q_total(개별 Q값 증가 -> 전체 Q값 증가)
-- Q_total: Q-value for the entire team
-- Q_individual: Q-value for each agent
-QMIX는 협력형 멀티 에이전트 알고리즘
-학습: state+joint action,
-실행: local observation+action
-exploration: epsilon-greedy
+from pettingzoo.mpe import simple_spread_v3
 
-
-- AgnetNet : DRQN: 각 에이전트의 개별 Q-value를 계산하는 네트워크
-- MixingNet : 개별 Q-value를 결합하여 joint Qtot-value를 계산하는 네트워크
-- HyperNetwork : MixingNet의 가중치와 편향을 상태(global state)에 따라 생성하는 네트워크
-'''
 
 class AgentNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, hidden_dim=64):  # input: obs_dim+action_dim, output: action_dim
@@ -150,7 +135,7 @@ class QMIX(nn.Module):
         last_actions = torch.tensor(batch.last_action, dtype=torch.float32).to(device)
 
         # Current Q-values
-        h_states = [torch.zeros(batch_size, self.agent_net[i].hidden_dim).to(device) for i in range(self.n_agents)]
+        h_states = [torch.zeros(batch_size, self.agent_qnets[i].idden_dim).to(device) for i in range(self.n_agents)]
         q_values, _ = self.forward_qs(obs, last_actions, h_states)
         chosen_qs = torch.gather(q_values, dim=2, index=actions.unsqueeze(-1)).squeeze(-1)
         q_tot = self.mixing_net(chosen_qs, state)
@@ -174,95 +159,56 @@ class QMIX(nn.Module):
         return loss.item()
 
 
-# def train_qmix():
-#     env = pistonball_v6.parallel_env()
-#     env = ss.color_reduction_v0(env, mode='B')
-#     env = ss.resize_v1(env, 84, 84)
-#     env = ss.frame_stack_v1(env, 4)
-#     env.reset()
-    
-#     agents = env.agents
-#     n_agents = len(agents)
-#     obs_shape = env.observation_space(agents[0]).shape
-#     obs_dim = int(np.prod(obs_shape))
-#     state_dim = obs_dim * n_agents
-#     action_dim = env.action_space(agents[0]).shape[0]
 
-#     qmix = QMIX(n_agents=n_agents, obs_dim=obs_dim, state_dim=state_dim, action_dim=action_dim)
-#     optimizer = optim.Adam(qmix.parameters(), lr=0.001)
-#     buffer = ReplayBuffer(capacity=10000)
+if __name__ == "__main__":
+    env = simple_spread_v3.env(render_mode = "human")
+    env.reset(seed=42)
 
+    n_agents = len(env.possible_agents)
+    obs_dim=env.observation_space(env.possible_agents[0]).shape[0]
+    state_dim = obs_dim * n_agents
+    action_dim =env.action_space(env.possible_agents[0]).np_random
 
-#     max_step = 500
-#     batch_size = 32
-#     epsilon = 0.1
+    qmix = QMIX(n_agents=n_agents, obs_dim=obs_dim, state_dim=state_dim, action_dim=action_dim)
+    optimizer = optim.Adam(qmix.parameters(), lr=0.001)
+    buffer = ReplayBuffer(capacity=10000)
 
-#     for episode in range(1000):
-#         obs_dict = env.reset()
-        
-#         if isinstance(obs_dict, tuple):
-#             obs_dict= obs_dict[0]
-#         done_dict = {agent: False for agent in agents}
+    # Training parameters
+    # max_steps = 500
+    batch_size = 32
+    epsilon = 0.1
+    episodes = 1000
 
-#         last_action_onehot = {
-#             agent: np.zeros(action_dim, dtype=np.float32) for agent in agents
-#         }
+    for episode in episodes:
+        env.reset(seed=42)
+        observations = {agent: env.observe(agent) for agent in env.agents}
+        dones = {agent: False for agent in env.agents}
 
-#         h_states = {
-#             agent: torch.zeros(1, qmix.agent_qnets[0].hidden_dim) for agent in agents
-#         }
-        
-#         for step in range(max_step):
-#             obs_array = np.array([obs_dict[agent].flatten() for agent in agents])
-#             obs_tensor = torch.tensor(obs_array, dtype=torch.float32)
-#             last_action_array = np.stack([last_action_onehot[a] for a in agents])
-#             last_action_tensor = torch.tensor(last_action_array, dtype=torch.float32)
+        while not all(dones.values()): # 모든 에이전트가 종료될때까지 반복
+            for agent in env.agent_iter():
+                observation, reward, termination, truncation, info = env.last()
+                action = None
 
-#             actions = []
-#             onehots = []
-#             with torch.no_grad():
-#                 for i, agent in enumerate(agents):
-#                     q_values, h = qmix.agent_qnets[i](obs_tensor[i].unsqueeze(0), last_action_tensor[i].unsqueeze(0), h_states[agent])
-#                     h_states[agent] = h
-#                     if np.random.rand() < epsilon:
-#                         a = np.random.uniform(env.action_space(agent).low, env.action_space(agent).high)
-#                     else:
-#                         # 정책 네트워크에서 연속적인 값을 출력하도록 수정
-#                         a = q_values.squeeze().detach().numpy()  # 연속적인 값으로 변환
-#                     actions.append(a)
-#                     onehot = np.zeros(action_dim, dtype=np.float32)
-#                     #onehot[int(a)] = 1.0
-#                     onehots.append(onehot)
-#                     last_action_onehot[agent] = onehot
-            
-#             action_dict = {agent: actions[i] for i, agent in enumerate(agents)}
-#             next_obs_dict, reward_dict, terminated, truncated, _ = env.step(action_dict)
-#             done_dict = {agent: terminated[agent] or truncated[agent] for agent in agents}
+                if not (termination or truncation):
+                    obs_tensor = torch.tensor(observation, dtype =torch.float32).unsqueeze(0)
+                    q_values, _ = qmix.forward_qs(obs_tensor, None, None)
+                    action = q_values.argmax().item()
+                else:
+                    action = None
+                env.step(action)
 
-#             next_obs_array = np.stack([next_obs_dict[agent].flatten() for agent in agents])
-#             reward = np.mean([reward_dict[a] for a in agents])
-#             done = any(done_dict.values())
-#             joint_obs = obs_array
-#             joint_next_obs = next_obs_array
+                next_observation, _, _, _, _ = env.last()
+                buffer.add((observation,action,reward, next_observation,termination))
+                observation = next_observation
 
-#             buffer.push(
-#                 joint_obs, joint_obs.flatten(),
-#                 actions, reward,
-#                 joint_next_obs, joint_next_obs.flatten(),
-#                 float(done),
-#                 last_action_array
-#             )
+                if len(buffer) >= batch_size:
+                    loss = qmix.train(buffer, batch_size, optimizer)
+                    print(f"Loss: {loss}")
 
-#             obs_dict = next_obs_dict
+                if termination:
+                    break
 
-#             if done:
-#                 break
-#         # Train the QMIX model
-#         loss = qmix.train(buffer, batch_size=batch_size, optimizer=optimizer)
-        
-#         if episode % 100 == 0:
-#             qmix.update_target()
-#             print(f"Episode {episode}, Loss: {loss:.4f}")
-
-# if __name__ == "__main__":
-#     train_qmix()
+                if episode % 100 == 0:
+                    qmix.update_target()
+                    print(f"Episode {episode}, Loss: {loss:.4f}")
+        env.close()

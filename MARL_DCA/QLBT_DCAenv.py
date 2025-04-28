@@ -10,6 +10,7 @@ from env.QLBT_agents import QLBT_Agent, QLBT_AP
 if 'ipykernel' in sys.modules:
     from IPython import display
 
+### action masking 필요 -채널 비지 상태일때는 패킷 전송 안함 
 class AccessPoint: 
     def __init__(self):
         self.channel_state = "IDLE"  # IDLE, ACK, COLLISION
