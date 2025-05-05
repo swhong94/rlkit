@@ -4,31 +4,35 @@ import torch.optim as optim
 import numpy as np
 import random
 from collections import deque
-from pettingzoo.mpe import simple_spread_v3
-from pettingzoo.utils.conversions import aec_to_parallel
-import supersuit as ss
-import matplotlib.pyplot as plt
 
 
 class AgentNetwork(nn.Module):
     '''
-    MARL problem -> partial observability, communication constraints among agents
-    -> necessity of lr of decentralized policy 
-    conditioning on the local action-observation history of each agent
+    @ brief:
+        evaluate Q(s,a) for each agent given a state and action
     '''
     def __init__(self, obs_dim, action_dim, hidden_dim=64):  # hidden_dim -> history 저장
         super(AgentNetwork, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.fc1 = nn.Linear(obs_dim+action_dim, hidden_dim)
+        self.obs_dim = obs_dim       #num of inputs
+        self.action_dim = action_dim #num of actions
+        self.fc1 = nn.Linear(obs_dim + action_dim, hidden_dim)
         self.gru = nn.GRUCell(hidden_dim, hidden_dim) 
         self.q_out = nn.Linear(hidden_dim, action_dim)
 
-
-    # 위의 함수는 네트워크가 저렇게 생겼다는 거고 밑에 forward 함수에서 input과 output 정의
-
     def forward(self, obs, last_action, h_in):
-        x = torch.cat([obs, last_action], dim=-1)
+        '''
+        @ params:
+            state : [#batch, #sequence, #agent, #n_feature]
+            action : [#batch, #sequence, #agent, #n_action]
+            h_in : [#batch, #sequence, #agent, #n_hidden]
+        @ return:
+            q : [#batch, #sequence, #agent, #n_action]
+            h_out : [#batch, #sequence, #agent, #n_hidden]
+        '''
+        x = torch.cat([obs, last_action], dim=-1) 
+        # x = torch.relu(self.fc1(obs))
         x = nn.functional.relu(self.fc1(x))
+        # h_in = h_in.reshape(-1, self.hidden_dim) # GRUCell의 input은 (batch_size, hidden_dim)이어야 함
         h = self.gru(x, h_in) # 기억 업데이트(partially observable)
         q = self.q_out(h)
         return q, h #각 에이전트의 Q-value와 hidden state(기억정보)를 반환
@@ -50,14 +54,14 @@ class MixingNetwork(nn.Module):
         self.hidden_dim = hidden_dim
         self.state_dim = state_dim
 
-        self.hyper_w1 = HyperNetwork(state_dim, n_agents * hidden_dim) # n_agents * each history
-        self.hyper_b1 = nn.Linear(state_dim, hidden_dim)
+        self.hyper_w1 = HyperNetwork(state_dim, n_agents * self.hidden_dim) # n_agents * each history
+        self.hyper_b1 = nn.Linear(state_dim, self.hidden_dim)
 
-        self.hyper_w2 = HyperNetwork(state_dim, hidden_dim)
+        self.hyper_w2 = HyperNetwork(state_dim, self.hidden_dim)
         self.hyper_b2 = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
+            nn.Linear(state_dim, self.hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1)  #Q_total
+            nn.Linear(self.hidden_dim, 1)  #Q_total
         )
 
     def forward(self, agents_q, state):  
@@ -221,9 +225,16 @@ class QMIX(nn.Module):
         loss.backward()
         self.optimizer.step()
 
-        print(f"Step: {self.step}, Loss: {loss.item():.4f}")
+        # print(f"Step: {self.step}, Loss: {loss.item():.4f}")
 
         self.update_target(self.step, self.update_interval)
+
+
+from pettingzoo.mpe import simple_spread_v3
+from pettingzoo.utils.conversions import aec_to_parallel
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
 
 if __name__ == "__main__":
     env = simple_spread_v3.env(render_mode = "human")
@@ -241,8 +252,8 @@ if __name__ == "__main__":
     trainer = QMIX(n_agents=n_agents, obs_dim=obs_dim, state_dim=state_dim, action_dim=action_dim,
                    batch_size=32, buffer_capacity=10000)
 
-    episodes = 1000
-    episode_limit = 30
+    episodes = 100
+    episode_limit = 25
     episode_reward = []
 
     for episode in range(episodes):
@@ -271,11 +282,12 @@ if __name__ == "__main__":
             reward_list = [float(rewards.get(agent, 0.0)) for agent in env.agents]
             # dones = [env.terminations[agent] or env.truncations[agent] for agent in env.agents]
             # done = np.all(dones)
-            print(f"reward_list shape: {np.shape(reward_list)}, content: {reward_list}")
-            if len(reward_list) != n_agents:
-                print(f"[Warning] Incomplete reward list: {reward_list}")
+            # print(f"reward_list shape: {np.shape(reward_list)}, content: {reward_list}")
+            # if len(reward_list) != n_agents:
+            #     print(f"[Warning] Incomplete reward list: {reward_list}")
 
-            else:
+            # else:
+            if len(reward_list) == n_agents:
                 trainer.store_transition((
                     np.array(obs_list, dtype=object),
                     np.array(one_hot_actions, dtype=np.float32),
@@ -293,7 +305,7 @@ if __name__ == "__main__":
   
         episode_reward.append(total_reward)
 
-        if trainer.step % 500 == 0:
+        if trainer.step % 100 == 0:
             avg_reward = np.mean(episode_reward[-10:])
             print(f"Step {trainer.step}, Average Reward (last 10 eps): {avg_reward:.2f}")
 
