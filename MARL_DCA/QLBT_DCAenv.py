@@ -5,7 +5,7 @@ import matplotlib.colors as colors
 import sys
 import time
 import torch
-from env.QLBT_agents import QLBT_Agent, QLBT_AP
+from IISL.MARL_DCA.QLBT_agents import QLBT_Agent, QLBT_AP
 
 if 'ipykernel' in sys.modules:
     from IPython import display
