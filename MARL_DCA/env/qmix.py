@@ -10,6 +10,13 @@ from pettingzoo.mpe import simple_spread_v3
 from pettingzoo.utils.conversions import aec_to_parallel
 from logger import Logger
 
+'''
+QMIX
+Lqmix: E(Sigma i=1^bs)[(yi_tot - Qi_tot(τ, u, s; θ))^2] 
+yi_tot = r +γ maxu′ Qtot(τ ′, u′, s′; θ−)
+Qtot(τ, u, s; θ) = f(Q1(τ1, u1, s; θ), Q2(τ2, u2, s; θ), ..., Qn(τn, un, s; θ); s)
+f: mixing network
+'''
 
 class AgentNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, hidden_dim=64):
@@ -21,26 +28,25 @@ class AgentNetwork(nn.Module):
     def forward(self, obs, last_action, his_in):
         x = torch.cat([obs, last_action], dim=-1)
         x = F.relu(self.fc1(x))
-        his_out = self.gru(x, his_in)
+        his_out = self.gru(x, his_in) # f.relu() 할지 말지 
         q = self.q_out(his_out)
-        return q, his_out
+        return q, his_out # q = action_dim만큼 (q1, q2, ... , qn) + his_out
 
 
 class HyperNetwork(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(HyperNetwork, self).__init__()
-        self.fc = nn.Linear(input_dim, output_dim)
-
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, output_dim),
+            nn.ReLU()
+        )
     def forward(self, state):
         return torch.abs(self.fc(state))
 
 
 class MixingNetwork(nn.Module):
     def __init__(self, n_agents, state_dim, hidden_dim=64):
-        '''
-        Mixing Network for QMIX
-        q_total = f(q1, q2, ..., qn; state) - state에 따라 달라지는 가중치
-        '''
+
         super(MixingNetwork, self).__init__()
         self.n_agents = n_agents
         self.hidden_dim = hidden_dim
@@ -53,7 +59,7 @@ class MixingNetwork(nn.Module):
         self.hyper_b2 = nn.Sequential(
             nn.Linear(state_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(hidden_dim, 1) # Q_tot
         )
 
     def forward(self, agents_q, state): # agents_q : [q1, q2, ... , qn], state

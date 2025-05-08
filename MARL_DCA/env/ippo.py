@@ -9,23 +9,30 @@ from torch.distributions import Categorical
 from pettingzoo.mpe import simple_spread_v3
 from logger import Logger  
 
+'''
+PPO
+Lclip : E[ min( r_t * A_t, clip(r_t, 1 - ε, 1 + ε) * A_t ) ]
+r_t = π(a_t|s_t) / π_old(a_t|s_t)
+Lppo: E[ Lclip - c1 * (V(s_t) - V_target)^2 + c2 * S(π(a_t|s_t)) ] , c1 = 0.5, c2 = 0.01 , S = entropy
+'''
 
-class PolicyNet(nn.Module):
+class PolicyNet(nn.Module): 
     def __init__(self, obs_dim, act_dim, hidden_dim=64, activation="ReLU"):
         super(PolicyNet, self).__init__()
         layers= []
         prev_dim = obs_dim
-        for h_dim in hidden_dim:
+        for h_dim in hidden_dim: # hidden_dim = [128, 128]
             layers.append(nn.Linear(prev_dim, h_dim))
             layers.append(getattr(nn, activation)())
             prev_dim = h_dim
         layers.append(nn.Linear(prev_dim, act_dim))
-        self.fc = nn.Sequential(*layers)
-
+        self.fc = nn.Sequential(*layers) 
+        # obs_dim -> hidden_dim[0] -> hidden_dim[1] -> act_dim
     def forward(self, state):
         logits = self.fc(state)
-        return logits
+        return logits # distribution π(a_t|s_t)
     
+
 class ValueNet(nn.Module):
     def __init__(self, obs_dim, hidden_dim=64, activation="ReLU"):
         super(ValueNet, self).__init__()
@@ -37,10 +44,10 @@ class ValueNet(nn.Module):
             prev_dim = h_dim
         layers.append(nn.Linear(prev_dim, 1))
         self.fc = nn.Sequential(*layers)
-
+        # obs_dim -> hidden_dim[0] -> hidden_dim[1] -> 1 
     def forward(self, state):
         value = self.fc(state)
-        return value
+        return value # V(s_t)
     
 
 class IPPO(nn.Module):
@@ -63,7 +70,7 @@ class IPPO(nn.Module):
                 ):
         super(IPPO, self).__init__()
 
-        # Enviornment
+        # Enviornment, Agents
         self.env = env
         env.reset()
         self.agents = env.agents
@@ -71,26 +78,24 @@ class IPPO(nn.Module):
 
         self.log_prefix = "ippo_" + "simple_spread"
 
-        self.policies = {}
-        self.values = {}
-        self.policy_optimizers = {}
-        self.value_optimizers = {}
-        self.obs_spaces = {} # for dictionary observation spaces
+        self.policies = {}              # {agent_0: policy_0, agent_1: policy_1, ...}
+        self.values = {}                # {agent_0: value_0, agent_1: value_1, ...}
+        self.policy_optimizers = {}     # {agent_0: policy_optimizer_0, agent_1: policy_optimizer_1, ...}   
+        self.value_optimizers = {}      # {agent_0: value_optimizer_0, agent_1: value_optimizer_1, ...}
+        self.obs_spaces = {}            # {agent_0: obs_space_0, agent_1: obs_space_1, ...}
 
         for agent in self.agents:
             obs_space = self.env.observation_space(agent)
-
-            # Compute total input dimension from discrete action space 
+            # obs_dim = self.env.observation_space(agent).shape[0]
+            
             if isinstance(obs_space, gym.spaces.Dict):
                 obs_dim = sum(space.n if isinstance(space, gym.spaces.Discrete) else space.shape[0] for space in obs_space.spaces.values())
             else:
                 obs_dim = obs_space.n if isinstance(obs_space, gym.spaces.Discrete) else obs_space.shape[0]
             # obs_dim = sum(space.n if isinstance(space, gym.spaces.Discrete) else space.shape[0] for space in obs_space.spaces.values()) 
             act_dim = self.env.action_space(agent).n
-            # obs_dim = self.env.observation_space(agent).shape[0]
             # assert isinstance(self.env.action_space(agent), gym.spaces.Discrete), "only supports discrete action space"
-            # act_dim = self.env.action_space(agent).n
-
+            
             self.policies[agent] = PolicyNet(obs_dim, act_dim, hidden_dims).to(self.device)
             self.values[agent] = ValueNet(obs_dim, hidden_dims).to(self.device)
             self.policy_optimizers[agent] = optim.Adam(self.policies[agent].parameters(), lr=policy_lr)
@@ -136,7 +141,7 @@ class IPPO(nn.Module):
         action = dist.sample()
         log_prob = dist.log_prob(action)
 
-        return action, log_prob, state_tensor
+        return action, log_prob, state_tensor   # action, ln(π(a_t|s_t)), state_tensor
     
 
     def compute_gae(self, rewards, values, next_values, dones):
@@ -146,6 +151,7 @@ class IPPO(nn.Module):
         advantages = []
         for td_error, done in zip(td_errors.flip(0), dones.flip(0)):
             gae = td_error + self.gae_lambda * self.gamma * gae * (1 - done)
+            # A_t = d_t + λ * γ * d_{t+1} * (1 - done) 
             advantages.insert(0,gae)
         
         return torch.FloatTensor(advantages)
@@ -160,9 +166,10 @@ class IPPO(nn.Module):
                                 'values':[],
                                 'dones':[],
                                 'next_states':[]} for agent in self.agents}
+        # trajectories = {agent_0: {'states':[], 'actions':[], 'log_probs':[], 'rewards':[], 'values':[], 'dones':[], 'next_states':[]}, ... }
         total_rewards = {agent: 0 for agent in self.agents}
 
-        # Collect trajectories
+        # Collect trajectories (buffer의 역할) 
         for _ in range(self.max_steps):
             actions = {}
 
@@ -184,7 +191,7 @@ class IPPO(nn.Module):
                 total_rewards[agent] += rewards[agent]
             
             observations = next_observations
-            if all(dones.values()) or all(truncs.values()):
+            if all(dones.values()) or all(truncs.values()): # all agents are done일 때 
                 break
 
         #Train each agent independently
@@ -192,26 +199,26 @@ class IPPO(nn.Module):
 
         for agent in self.agents:
             tau_a = trajectories[agent]
-            states = torch.stack(tau_a['states'])
+            states = torch.stack(tau_a['states']) # states, actions -> dimension 이 있어서 stack 해줘야함
             actions = torch.stack(tau_a['actions'])
             log_probs_old = torch.stack(tau_a['log_probs'])
-            rewards = torch.FloatTensor(tau_a['rewards']).to(self.device)
+            rewards = torch.FloatTensor(tau_a['rewards']).to(self.device) # rewards, dones -> 값이 1개라서 floatTensor로 변환
             dones = torch.FloatTensor(tau_a['dones']).to(self.device)
             next_states = torch.stack(tau_a['next_states'])
-            values = self.values[agent](states).squeeze()
+            values = self.values[agent](states).squeeze() # squeeze() -> 1차원으로 변환(차원 축소)
             next_values = self.values[agent](next_states).squeeze()
 
             # Compute GAE
             advantages = self.compute_gae(rewards, values.detach(), next_values.detach(), dones)
-            returns = advantages + values.detach()
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            returns = advantages + values.detach() # returns = Q(st, at)
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8) # normalize
 
             dataset_size = states.size(0)
             total_policy_loss, total_value_loss, total_entropy, update_count = 0, 0, 0, 0
 
             for _ in range(self.epochs):
-                random_indices = torch.randperm(dataset_size)
-                for i in range(0, dataset_size, self.batch_size):
+                random_indices = torch.randperm(dataset_size) # states -> shuffle 중복 없이
+                for i in range(0, dataset_size, self.batch_size): # (0, states.size, 64) -> (0, 64), (64, 128), (128, 192), ...
                     batch_indices = random_indices[i:i+self.batch_size]
                     batch_states = states[batch_indices]
                     batch_actions = actions[batch_indices]
@@ -230,7 +237,7 @@ class IPPO(nn.Module):
                     # Compute surrogate loss
                     surr1 = ratio * batch_advantages
                     surr2 = torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * batch_advantages
-                    policy_loss = -torch.min(surr1, surr2).mean()
+                    policy_loss = -torch.min(surr1, surr2).mean() # maximize -> -Lclip
 
                     # Compute entropy loss
                     entropy_loss = dist.entropy().mean()
@@ -270,7 +277,7 @@ class IPPO(nn.Module):
                 'avg_policy_loss': avg_policy_loss,
                 'avg_value_loss': avg_value_loss,
                 'avg_entropy': avg_entropy,
-                'total_reward': total_rewards[agent]
+                'total_reward': total_rewards[agent] # agent별로
             } 
         return metrics
     
