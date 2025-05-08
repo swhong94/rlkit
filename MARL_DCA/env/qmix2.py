@@ -341,8 +341,56 @@ class QMIX(nn.Module):
         }
         return metrics
     
+    def rollout_episode(self):
+        env = self.env
+        env.reset()
+        episode_data = []
+
+        obs = {agent: self.preprocess_observation(env.observe(agent), agent) for agent in self.agents}
+        h_states = {agent: torch.zeros(self.agent_nets[agent].hidden_dim, device=self.device) for agent in self.agents}
+        last_actions = {agent: torch.zeros(self.env.action_space(agent).n, device=self.device) for agent in self.agents}
+
+        done = {agent: False for agent in self.agents}
+        terminated = False
+
+        while not terminated:
+            actions, h_next = {}, {}
+            for agent in self.agents:
+                action, h_new = self.select_action(agent, obs[agent], last_actions[agent], h_states[agent])
+                actions[agent] = action
+                h_next[agent] = h_new
+
+            next_obs, rewards, terminations, truncations, infos = env.step(actions)
+            terminated = all(terminations.values())
+
+            next_obs_proc = {agent: self.preprocess_observation(next_obs[agent], agent) for agent in self.agents}
+            joint_obs = torch.stack([obs[agent] for agent in self.agents])
+            joint_next_obs = torch.stack([next_obs_proc[agent] for agent in self.agents])
+            joint_actions = torch.tensor([actions[agent] for agent in self.agents])
+            joint_rewards = torch.tensor([rewards[agent] for agent in self.agents]).unsqueeze(-1)
+            joint_dones = torch.tensor([terminations[agent] for agent in self.agents]).unsqueeze(-1)
+            joint_hidden = torch.stack([h_states[agent] for agent in self.agents])
+
+            episode_data.append((joint_hidden, joint_obs, joint_actions, joint_rewards, joint_next_obs, joint_dones))
+
+            obs = next_obs_proc
+            h_states = h_next
+            last_actions = F.one_hot(joint_actions, num_classes=joint_actions.max().item() + 1).float().to(self.device)
+
+        h_seq, s_seq, a_seq, r_seq, ns_seq, d_seq = zip(*episode_data)
+        self.buffer.push(
+            hidden_seq=torch.stack(h_seq),
+            state_seq=torch.stack(s_seq),
+            action_seq=torch.stack(a_seq),
+            reward_seq=torch.stack(r_seq),
+            next_state_seq=torch.stack(ns_seq),
+            dones=torch.stack(d_seq)
+        )
+
+    
     def train(self, max_episode =1000, log_interval = 10):
         for episode in range(max_episode):
+            self.rollout_episode()
             metrics = self.update()
 
             if not metrics:
