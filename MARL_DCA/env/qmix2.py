@@ -221,7 +221,7 @@ class QMIX(nn.Module):
         self.clip_grad = clip_grad
         self.epsilon_start = 1.0
         self.epsilon_end = 0.05
-        self.decay_ratio = 0.98
+        self.decay_ratio = 0.995
         self.step = 0
 
         self.logger = Logger(log_dir, self.log_prefix, plot_window)
@@ -360,7 +360,7 @@ class QMIX(nn.Module):
 
         metrics = {
             'avg_loss': loss.item(),
-            'avg_reward': r_total.sum().item() / B,
+            'avg_reward': r_total.sum().item() / (B*N),
             'avg_entropy': self.epsilon_decay(),
             'per_agent_rewards': {agent: per_agent_rewards[i].item() for i, agent in enumerate(self.agents)},
             'per_agent_losses': {agent: per_agent_losses[i].item() for i, agent in enumerate(self.agents)}
@@ -436,13 +436,13 @@ class QMIX(nn.Module):
 
             # Log per-agent metrics
             for agent in self.agents:
-                log_data[f'{agent}_reward'] = metrics['per_agent_rewards'][agent]
+                #log_data[f'{agent}_reward'] = metrics['per_agent_rewards'][agent]
                 log_data[f'{agent}_loss'] = metrics['per_agent_losses'][agent]
             
             self.logger.log_metrics(log_data, episode)
 
             if episode % log_interval == 0:
-                self.logger.info(f"Episode {episode} | Avg Reward: {metrics['avg_reward']:.4f } | Avg Loss: {metrics['avg_loss']:.4f} | Avg Entropy: {metrics['avg_entropy']:.4f}")
+                self.logger.info(f"Episode {episode} | Avg Reward: {metrics['avg_reward']:.4f} | Avg Loss: {metrics['avg_loss']:.4f} | Avg Entropy: {metrics['avg_entropy']:.4f}")
 
         self.logger.close()
 
@@ -460,8 +460,8 @@ if __name__ == '__main__':
     hidden_dims = 128
 
     qmix = QMIX(env=env, hidden_dims=hidden_dims, batch_size=64, buffer_capacity=10000, lr=0.0003, gamma=0.95,
-                epochs=10, max_steps=200, log_dir="logs/qmix_discrete_logs", plot_window=100,
+                epochs=10, max_steps=200, log_dir="logs/qmix_simple_spread_logs", plot_window=100,
                 update_interval=100, device="cpu")
 
-    qmix.train(max_episode=500, log_interval=10)
+    qmix.train(max_episode=1000, log_interval=10)
     
