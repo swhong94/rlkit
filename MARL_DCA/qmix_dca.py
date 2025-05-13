@@ -9,7 +9,12 @@ from collections import deque
 import gymnasium as gym
 from pettingzoo.mpe import simple_spread_v3
 from pettingzoo.utils.conversions import aec_to_parallel
-from logger import Logger
+from env.logger import Logger
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/..")
+from DCA.dca_env.DCAenv import DCAEnv
 
 '''
 QMIX
@@ -19,9 +24,10 @@ Qtot(τ, u, s; θ) = f(Q1(τ1, u1, s; θ), Q2(τ2, u2, s; θ), ..., Qn(τn, un, 
 f: mixing network
 '''
 
-# 1. Q individual
+# 1. Q individual - 해결
 # 2. graph -> episode 0부터
-# 3. soft update
+# 3. soft update - 해결
+# 4. matplotlib 띄우도록 
 
 class AgentNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, hidden_dim=64):
@@ -488,7 +494,12 @@ class QMIX(nn.Module):
 
 
 if __name__ == '__main__':
-    env = simple_spread_v3.parallel_env(N=3, max_cycles = 200, continuous_actions=False)
+
+    num_nodes = 5
+    max_steps = 1000
+    env = DCAEnv(num_agents=num_nodes, max_cycles=max_steps, render_mode='rgb_array')
+
+    # env = simple_spread_v3.parallel_env(N=3, max_cycles = 200, continuous_actions=False)
     # env = aec_to_parallel(env)
     hidden_dims = 128
 
@@ -497,4 +508,26 @@ if __name__ == '__main__':
                 update_interval=100, device="cpu", tau=0.01)
 
     qmix.train(max_episode=1000, log_interval=10)
+
+    
+    # agents = [CSMA_CA_Agent(i, cw_min=2, cw_max=16) for i in range(num_nodes)]
+    
+    # total_reward = 0
+
+    # observation, _ = env.reset() 
+    # actions_csma = np.array([agent.act(observation) for agent in agents])
+ 
+    # for _ in range(max_steps):
+    #     action = np.array([agent.act(observation) for agent in agents])
+    #     next_obs, reward, terminated, truncated, info = env.step(action) 
+    #     env.render()
+    #     total_reward += reward
+    #     observation = next_obs
+    #     if terminated or truncated: #window+c -> 종료 
+    #         break
+
+    # if not env.NOTEBOOK:
+    #     plt.show()
+
+    # print(f"average episode reward (CSMA): {total_reward / max_steps}")
     
