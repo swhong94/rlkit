@@ -181,7 +181,11 @@ class QMIX(nn.Module):
         
         # Environment
         self.env = env
-        env.reset()
+        self.env.reset()
+        for landmark in env.aec_env.unwrapped.world.landmarks:
+            landmark.state.p_vel = np.zeros(2)
+            landmark.movable = False
+            landmark.collide = False
         self.agents = env.agents
         self.n_agents = len(self.agents) # N
         self.device = torch.device(device)
@@ -394,6 +398,10 @@ class QMIX(nn.Module):
     def rollout_episode(self): ## 에피소드 단위로 collect 
         env = self.env
         obs_dict, _ = self.env.reset()
+        for landmark in env.aec_env.unwrapped.world.landmarks:
+            landmark.state.p_vel = np.zeros(2)
+            landmark.movable = False
+            landmark.collide = False
         episode_data = []
 
         obs = {agent: self.preprocess_observation(obs_dict[agent], agent) for agent in self.agents}
@@ -459,7 +467,7 @@ class QMIX(nn.Module):
                 'avg_reward': metrics['avg_reward'],
                 'avg_q_total': metrics['avg_q_total'],
                 'avg_loss': metrics['avg_loss'],
-                'avg_entropy': metrics['avg_entropy'],
+                #'avg_entropy': metrics['avg_entropy'],
             }
 
             # Log per-agent metrics
@@ -470,7 +478,7 @@ class QMIX(nn.Module):
             self.logger.log_metrics(log_data, episode)
 
             if episode % log_interval == 0:
-                self.logger.info(f"Episode {episode} | Avg Reward: {metrics['avg_reward']:.4f} | Avg Q total: {metrics['avg_q_total']:.4f} | Avg Loss: {metrics['avg_loss']:.4f} | Avg Entropy: {metrics['avg_entropy']:.4f}")
+                self.logger.info(f"Episode {episode} | Avg Reward: {metrics['avg_reward']:.4f} | Avg Q total: {metrics['avg_q_total']:.4f} | Avg Loss: {metrics['avg_loss']:.4f}") #| Avg Entropy: {metrics['avg_entropy']:.4f}
                 # self.logger.info(
                 # f"Episode {episode} | Avg Reward: {metrics['avg_reward']:.4f} | "
                 # f"Avg Loss: {metrics['avg_loss']:.4f} | Avg Entropy: {metrics['avg_entropy']:.4f} | "
@@ -488,7 +496,10 @@ class QMIX(nn.Module):
 
 
 if __name__ == '__main__':
-    env = simple_spread_v3.parallel_env(N=3, max_cycles = 200, continuous_actions=False)
+    env = simple_spread_v3.parallel_env(render_mode = 'None', N=3, max_cycles = 200, continuous_actions=False)
+
+    for agent in env.aec_env.unwrapped.world.agents:
+        agent.size = 0.02
     # env = aec_to_parallel(env)
     hidden_dims = 128
 

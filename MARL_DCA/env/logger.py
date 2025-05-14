@@ -4,6 +4,9 @@ import csv
 from datetime import datetime  
 
 import numpy as np 
+import matplotlib
+matplotlib.use('Qt5Agg')  # 더 안정적
+
 import matplotlib.pyplot as plt 
 import math
 
